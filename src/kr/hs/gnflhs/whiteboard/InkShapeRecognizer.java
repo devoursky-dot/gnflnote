@@ -4,18 +4,24 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * GNFL NOTE V1.6 - 보정펜 공통 도형 판별기 (원 / 삼각형 / 사각형 / 직선).
+ * GNFL NOTE V2.0 - 보정펜 공통 도형 판별기 (원 / 타원 / 삼각형 / 사각형 / 직선).
  * Android 의존성이 없는 순수 기하 연산.
+ * - PCA 주축 피팅 기반 원/타원 자동 타협 보정 (종횡비 <= 1.25 원, > 1.25 타원, ±12° 수평/수직 스냅)
  * - 꼭짓점(꺾임) 검출 기반 삼각형(3꼭짓점) 및 사각형(4꼭짓점) 판별 지원
  * - 사각형은 직각에 가까우면 반듯한 직사각형(수평/수직 정렬 포함),
  *   사다리꼴/평행사변형처럼 의도적으로 꺾은 경우 4개 꼭짓점 그대로 유지
  */
 final class InkShapeRecognizer {
-    enum Kind { CIRCLE, TRIANGLE, RECTANGLE }
+    enum Kind { CIRCLE, ELLIPSE, TRIANGLE, RECTANGLE }
+
+    private static final float CIRCLE_ELLIPSE_ASPECT_THRESHOLD = 1.25f;
+    private static final float MAX_ELLIPSE_ASPECT = 5.5f;
+    private static final double ELLIPSE_AXIS_SNAP_DEG = 12.0;
 
     static final class Shape {
         final Kind kind;
         final float centerX, centerY, radius;
+        final float radiusX, radiusY, angleRad;
         final float[] corners; // 다각형 꼭짓점 [x0, y0, x1, y1, ...]
         final float confidence;
 
@@ -24,9 +30,30 @@ final class InkShapeRecognizer {
             centerX = cx;
             centerY = cy;
             radius = r;
+            radiusX = r;
+            radiusY = r;
+            angleRad = 0f;
             corners = vertices;
             confidence = score;
         }
+
+        private Shape(Kind type, float cx, float cy, float rx, float ry, float angle, float score) {
+            kind = type;
+            centerX = cx;
+            centerY = cy;
+            radius = (rx + ry) * 0.5f;
+            radiusX = rx;
+            radiusY = ry;
+            angleRad = angle;
+            corners = null;
+            confidence = score;
+        }
+    }
+
+    private static final class EllipseFit {
+        float cx, cy, rx, ry, angleRad;
+        float aspect, normError, perimeterRatio;
+        boolean valid;
     }
 
     private static final float PI = (float) Math.PI;
@@ -62,7 +89,7 @@ final class InkShapeRecognizer {
         float closureTolerance = Math.max(24f, Math.min(95f, shortSide * scale * 0.28f));
         if (closure > closureTolerance) return null;
 
-        // 1. 원(Circle) 후보 평가
+        // 1. 원(Circle) / 타원(Ellipse) 후보 평가 (PCA 주축 피팅 + 원/타원 자동 타협)
         float fx = xy[farthest * 2], fy = xy[farthest * 2 + 1];
         float cx = (sx + fx) * 0.5f, cy = (sy + fy) * 0.5f;
         float radius = farthestDistance * 0.5f;
@@ -74,8 +101,38 @@ final class InkShapeRecognizer {
         circleError = circleError / count / Math.max(1f, radius);
         float circlePerimeter = 2f * PI * radius;
         float circleRatio = length / Math.max(1f, circlePerimeter);
-        boolean circleOk = circleError <= 0.115f && circleRatio >= 0.73f && circleRatio <= 1.43f
-                && Math.max(width, height) / Math.max(1f, shortSide) <= 1.55f;
+
+        EllipseFit efit = fitEllipseInternal(xy, count, length);
+        boolean curveOk = false;
+        boolean curveIsEllipse = false;
+        float curveError = Float.POSITIVE_INFINITY;
+        float curveCx = cx, curveCy = cy, curveR = radius;
+
+        if (efit.valid && efit.ry * scale >= 18f && efit.aspect <= MAX_ELLIPSE_ASPECT
+                && efit.perimeterRatio >= 0.73f && efit.perimeterRatio <= 1.45f) {
+            if (efit.aspect <= CIRCLE_ELLIPSE_ASPECT_THRESHOLD) {
+                // 장단축 비율이 1.25 이하: 사용자가 원을 의도한 것으로 타협 -> 정원(Circle)으로 보정
+                boolean strictCircle = circleError <= 0.115f && circleRatio >= 0.73f && circleRatio <= 1.43f;
+                if (strictCircle || efit.normError <= 0.125f) {
+                    curveOk = true;
+                    curveIsEllipse = false;
+                    curveCx = efit.cx;
+                    curveCy = efit.cy;
+                    curveR = (efit.rx + efit.ry) * 0.5f;
+                    curveError = Math.min(circleError, efit.normError);
+                }
+            } else if (efit.normError <= 0.125f) {
+                // 장단축 비율이 1.25 초과 ~ 5.5 이하: 의도적 타원(Ellipse)으로 보정
+                curveOk = true;
+                curveIsEllipse = true;
+                curveError = efit.normError;
+            }
+        } else if (circleError <= 0.115f && circleRatio >= 0.73f && circleRatio <= 1.43f
+                && Math.max(width, height) / Math.max(1f, shortSide) <= CIRCLE_ELLIPSE_ASPECT_THRESHOLD) {
+            curveOk = true;
+            curveIsEllipse = false;
+            curveError = circleError;
+        }
 
         // 2. 꺾임(꼭짓점) 기반 삼각형 / 사각형 후보 검출
         float[] triCorners = null;
@@ -190,17 +247,145 @@ final class InkShapeRecognizer {
         boolean triOk = (triCorners != null && triError <= 0.082f);
         boolean rectOk = (bestRectCorners != null && bestRectError <= 0.085f);
 
-        // 5. 원 vs 삼각형 vs 사각형 경쟁 판정
-        if (triOk && (!rectOk || triError <= bestRectError * 0.96f) && (!circleOk || triError <= circleError * 1.05f)) {
+        // 5. 원/타원 vs 삼각형 vs 사각형 경쟁 판정
+        if (triOk && (!rectOk || triError <= bestRectError * 0.96f) && (!curveOk || triError <= curveError * 1.05f)) {
             return new Shape(Kind.TRIANGLE, 0, 0, 0, alignPolygonBaselineIfClose(triCorners, 10.0f), triError);
         }
-        if (rectOk && (!circleOk || bestRectError <= circleError * 0.98f)) {
+        if (rectOk && (!curveOk || bestRectError <= curveError * 0.98f)) {
             return new Shape(Kind.RECTANGLE, 0, 0, 0, bestRectCorners, bestRectError);
         }
-        if (circleOk) {
-            return new Shape(Kind.CIRCLE, cx, cy, radius, null, circleError);
+        if (curveOk) {
+            if (curveIsEllipse) {
+                return new Shape(Kind.ELLIPSE, efit.cx, efit.cy, efit.rx, efit.ry, efit.angleRad, curveError);
+            }
+            return new Shape(Kind.CIRCLE, curveCx, curveCy, curveR, null, curveError);
         }
         return null;
+    }
+
+    /**
+     * 닫힌 궤적이 detectClosed() 임계값에 미세하게 못 미칠 때의 보조 원/타원 추정기.
+     * PCA 주축 피팅으로 종횡비 <= 1.25는 원, 1.25 초과 ~ 5.5 이하는 타원으로 판별합니다.
+     */
+    static Shape fitFallbackCircleOrEllipse(float[] xy, int count) {
+        if (xy == null || count < 8) return null;
+        float length = 0f;
+        for (int i = 1; i < count; i++) {
+            length += (float) Math.hypot(xy[i * 2] - xy[(i - 1) * 2], xy[i * 2 + 1] - xy[(i - 1) * 2 + 1]);
+        }
+        EllipseFit efit = fitEllipseInternal(xy, count, length);
+        if (!efit.valid || efit.ry < 15f) return null;
+        if (efit.aspect > CIRCLE_ELLIPSE_ASPECT_THRESHOLD && efit.aspect <= MAX_ELLIPSE_ASPECT) {
+            return new Shape(Kind.ELLIPSE, efit.cx, efit.cy, efit.rx, efit.ry, efit.angleRad, efit.normError);
+        }
+        float r = (efit.rx + efit.ry) * 0.5f;
+        if (r < 15f) return null;
+        return new Shape(Kind.CIRCLE, efit.cx, efit.cy, r, null, efit.normError);
+    }
+
+    /**
+     * 선분 길이 가중 PCA(주성분 분석)로 타원의 중심, 장축/단축 반지름, 회전각을 피팅합니다.
+     * - 멈춤 구간의 중복 점 뭉침에 영향을 받지 않도록 선분 길이 가중치를 적용
+     * - 회전각이 수평(0°)/수직(90°)에서 ±12° 이내이면 반듯하게 스냅, 그 이상은 의도된 기울기 보존
+     */
+    private static EllipseFit fitEllipseInternal(float[] xy, int count, float length) {
+        EllipseFit out = new EllipseFit();
+        if (xy == null || count < 6) return out;
+
+        double sumW = 0.0, mx = 0.0, my = 0.0;
+        for (int i = 1; i < count; i++) {
+            double x0 = xy[(i - 1) * 2], y0 = xy[(i - 1) * 2 + 1];
+            double x1 = xy[i * 2], y1 = xy[i * 2 + 1];
+            double w = Math.hypot(x1 - x0, y1 - y0);
+            if (w < 1e-4) continue;
+            mx += 0.5 * (x0 + x1) * w;
+            my += 0.5 * (y0 + y1) * w;
+            sumW += w;
+        }
+        if (sumW < 1.0) return out;
+        mx /= sumW;
+        my /= sumW;
+
+        double sxx = 0.0, syy = 0.0, sxy = 0.0;
+        for (int i = 1; i < count; i++) {
+            double x0 = xy[(i - 1) * 2], y0 = xy[(i - 1) * 2 + 1];
+            double x1 = xy[i * 2], y1 = xy[i * 2 + 1];
+            double w = Math.hypot(x1 - x0, y1 - y0);
+            if (w < 1e-4) continue;
+            double dx = 0.5 * (x0 + x1) - mx;
+            double dy = 0.5 * (y0 + y1) - my;
+            sxx += w * dx * dx;
+            syy += w * dy * dy;
+            sxy += w * dx * dy;
+        }
+
+        double theta = 0.5 * Math.atan2(2.0 * sxy, sxx - syy);
+        double deg = Math.toDegrees(theta);
+        if (Math.abs(deg) <= ELLIPSE_AXIS_SNAP_DEG) {
+            theta = 0.0;
+        } else if (Math.abs(Math.abs(deg) - 90.0) <= ELLIPSE_AXIS_SNAP_DEG) {
+            theta = (deg >= 0.0) ? (Math.PI * 0.5) : (-Math.PI * 0.5);
+        }
+
+        double cos = Math.cos(theta), sin = Math.sin(theta);
+        double minU = Double.POSITIVE_INFINITY, maxU = Double.NEGATIVE_INFINITY;
+        double minV = Double.POSITIVE_INFINITY, maxV = Double.NEGATIVE_INFINITY;
+        for (int i = 0; i < count; i++) {
+            double dx = xy[i * 2] - mx;
+            double dy = xy[i * 2 + 1] - my;
+            double u = dx * cos + dy * sin;
+            double v = -dx * sin + dy * cos;
+            if (u < minU) minU = u;
+            if (u > maxU) maxU = u;
+            if (v < minV) minV = v;
+            if (v > maxV) maxV = v;
+        }
+
+        double cu = 0.5 * (minU + maxU);
+        double cv = 0.5 * (minV + maxV);
+        double ecx = mx + cu * cos - cv * sin;
+        double ecy = my + cu * sin + cv * cos;
+        double rx = 0.5 * (maxU - minU);
+        double ry = 0.5 * (maxV - minV);
+        if (rx < 1.0 || ry < 1.0) return out;
+
+        if (ry > rx) {
+            double tmp = rx;
+            rx = ry;
+            ry = tmp;
+            theta += Math.PI * 0.5;
+            if (theta > Math.PI * 0.5) theta -= Math.PI;
+            if (theta <= -Math.PI * 0.5) theta += Math.PI;
+            cos = Math.cos(theta);
+            sin = Math.sin(theta);
+        }
+
+        double errSum = 0.0;
+        for (int i = 1; i < count; i++) {
+            double x0 = xy[(i - 1) * 2], y0 = xy[(i - 1) * 2 + 1];
+            double x1 = xy[i * 2], y1 = xy[i * 2 + 1];
+            double w = Math.hypot(x1 - x0, y1 - y0);
+            if (w < 1e-4) continue;
+            double dx = 0.5 * (x0 + x1) - ecx;
+            double dy = 0.5 * (y0 + y1) - ecy;
+            double u = (dx * cos + dy * sin) / rx;
+            double v = (-dx * sin + dy * cos) / ry;
+            double normR = Math.hypot(u, v);
+            errSum += w * Math.abs(normR - 1.0);
+        }
+
+        double hSum = rx + ry;
+        double ellPerim = Math.PI * (3.0 * hSum - Math.sqrt(Math.max(0.0, (3.0 * rx + ry) * (rx + 3.0 * ry))));
+        out.cx = (float) ecx;
+        out.cy = (float) ecy;
+        out.rx = (float) rx;
+        out.ry = (float) ry;
+        out.angleRad = (float) theta;
+        out.aspect = (float) (rx / Math.max(1.0, ry));
+        out.normError = (float) (errSum / sumW);
+        out.perimeterRatio = (float) (length / Math.max(1.0, ellPerim));
+        out.valid = true;
+        return out;
     }
 
     /**

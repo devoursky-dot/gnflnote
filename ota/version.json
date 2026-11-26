@@ -1,10 +1,10 @@
 {
-    "patchVersion":  206,
-    "patchName":  "2.0.6",
-    "buildDate":  "2026-11-26 19:01",
+    "patchVersion":  207,
+    "patchName":  "2.0.7",
+    "buildDate":  "2026-11-26 19:11",
     "minBaseVersionCode":  20900200,
     "dexUrl":  "https://raw.githubusercontent.com/devoursky-dot/gnflnote/main/ota/gnfl_patch.dex",
-    "sha256":  "aff2b95141de01d41865a2dda566a706e232c1788a07151fd997554f6351e59c",
-    "sizeBytes":  195236,
-    "releaseNotes":  "도형 팝업이 \u0027더 보기\u0027가 아닌 \u0027도형\u0027 버튼 바로 위에 정확히 열리도록 위치 보정"
+    "sha256":  "b2db44d52335cd55bf9dc743649839bc22b3d0a684c06d7b3919ed33a0d508dd",
+    "sizeBytes":  200312,
+    "releaseNotes":  "스마트펜 원·타원 자동 타협 보정 추가 (기울어진 타원 및 ±12도 수평/수직 정렬 지원)"
 }

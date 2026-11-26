@@ -331,7 +331,7 @@ public class SmartPenManager {
                         SmartPenOverlayView.ShapeType st = mOverlayView.getActiveType();
                         if (st == SmartPenOverlayView.ShapeType.LINE) {
                             mOverlayView.updateRecognizedLineEnd(x, y);
-                        } else if (st == SmartPenOverlayView.ShapeType.CIRCLE) {
+                        } else if (st == SmartPenOverlayView.ShapeType.CIRCLE || st == SmartPenOverlayView.ShapeType.ELLIPSE) {
                             mOverlayView.translateRecognizedCircle(x - mLastX, y - mLastY);
                         } else if (st == SmartPenOverlayView.ShapeType.POLYGON) {
                             mOverlayView.translateRecognizedPolygon(x - mLastX, y - mLastY);
@@ -459,6 +459,40 @@ public class SmartPenManager {
     }
 
     /**
+     * 일반 판서 획으로 그릴 때 겹침이나 어긋남이 없는 정밀 회전 타원 좌표 생성:
+     * - 0° → 360° 1바퀴만 생성 + 0.5° 접선 가이드 포인트로 시작/끝 이음새 어긋남 0%
+     */
+    private List<PointF> buildEllipseReplayPoints(float cx, float cy, float rx, float ry, float angleRad) {
+        List<PointF> pts = new ArrayList<PointF>();
+        int steps = 120;
+        double cosT = Math.cos(angleRad);
+        double sinT = Math.sin(angleRad);
+        float startX = cx + (float) (rx * cosT);
+        float startY = cy + (float) (rx * sinT);
+        pts.add(new PointF(startX, startY));
+
+        double leadAngle = Math.toRadians(0.5);
+        double lx = rx * Math.cos(leadAngle);
+        double ly = ry * Math.sin(leadAngle);
+        pts.add(new PointF(
+                cx + (float) (lx * cosT - ly * sinT),
+                cy + (float) (lx * sinT + ly * cosT)
+        ));
+
+        for (int i = 1; i < steps; i++) {
+            double angle = 2.0 * Math.PI * i / steps;
+            double px = rx * Math.cos(angle);
+            double py = ry * Math.sin(angle);
+            pts.add(new PointF(
+                    cx + (float) (px * cosT - py * sinT),
+                    cy + (float) (px * sinT + py * cosT)
+            ));
+        }
+        pts.add(new PointF(startX, startY));
+        return pts;
+    }
+
+    /**
      * 삼각형/사각형의 각 변을 독립 직선 획으로 순정 판서 레이어에 순차 주입합니다.
      * - 한 획에 이어 그릴 때 발생하는 순정 베지어 스무딩의 모서리 둥글림을 100% 제거해
      *   자 대고 그은 것처럼 날카로운 각진 꼭짓점을 만듭니다.
@@ -507,6 +541,14 @@ public class SmartPenManager {
                     mOverlayView.getCircleCx(),
                     mOverlayView.getCircleCy(),
                     mOverlayView.getCircleR()
+            ));
+        } else if (type == SmartPenOverlayView.ShapeType.ELLIPSE) {
+            pts.addAll(buildEllipseReplayPoints(
+                    mOverlayView.getCircleCx(),
+                    mOverlayView.getCircleCy(),
+                    mOverlayView.getEllipseRx(),
+                    mOverlayView.getEllipseRy(),
+                    mOverlayView.getEllipseAngleRad()
             ));
         } else if (type == SmartPenOverlayView.ShapeType.SPLINE) {
             pts.addAll(mRecognizedSplinePoints);
@@ -631,28 +673,54 @@ public class SmartPenManager {
             return;
         }
 
-        boolean isCircle = (closedShape != null && closedShape.kind == InkShapeRecognizer.Kind.CIRCLE)
-                || (closedShape == null && count >= 10 && closureDist < 85.0f);
-
-        if (isCircle) {
-            float minX = sx, maxX = sx, minY = sy, maxY = sy;
-            for (int i = 0; i < count; i++) {
-                minX = Math.min(minX, raw[i * 2]);
-                maxX = Math.max(maxX, raw[i * 2]);
-                minY = Math.min(minY, raw[i * 2 + 1]);
-                maxY = Math.max(maxY, raw[i * 2 + 1]);
-            }
-            float cx = (minX + maxX) * 0.5f;
-            float cy = (minY + maxY) * 0.5f;
-            float r = (closedShape != null) ? closedShape.radius : ((maxX - minX + maxY - minY) * 0.25f);
-
-            if (r > 15.0f) {
+        if (closedShape != null && closedShape.kind == InkShapeRecognizer.Kind.ELLIPSE) {
+            if (closedShape.radiusY > 15.0f) {
                 discardStockStroke(mCurrentActivity);
                 mOverlayView.setStrokeColor(mCurrentColor);
                 mOverlayView.setStrokeWidth(mCurrentWidth);
-                mOverlayView.showRecognizedCircle(cx, cy, r);
+                mOverlayView.showRecognizedEllipse(
+                        closedShape.centerX, closedShape.centerY,
+                        closedShape.radiusX, closedShape.radiusY, closedShape.angleRad);
                 mRecognized = true;
+                Log.i(TAG, "SmartPen recognized ELLIPSE rx=" + closedShape.radiusX
+                        + " ry=" + closedShape.radiusY + " deg=" + Math.toDegrees(closedShape.angleRad)
+                        + " err=" + closedShape.confidence);
+                showToast(mCurrentActivity, "⬭ 타원 자동 완성");
+                return;
+            }
+        }
+
+        if (closedShape != null && closedShape.kind == InkShapeRecognizer.Kind.CIRCLE) {
+            if (closedShape.radius > 15.0f) {
+                discardStockStroke(mCurrentActivity);
+                mOverlayView.setStrokeColor(mCurrentColor);
+                mOverlayView.setStrokeWidth(mCurrentWidth);
+                mOverlayView.showRecognizedCircle(closedShape.centerX, closedShape.centerY, closedShape.radius);
+                mRecognized = true;
+                Log.i(TAG, "SmartPen recognized CIRCLE r=" + closedShape.radius
+                        + " err=" + closedShape.confidence);
                 showToast(mCurrentActivity, "⭕ 원 자동 완성");
+                return;
+            }
+        }
+
+        if (closedShape == null && count >= 10 && closureDist < 85.0f) {
+            InkShapeRecognizer.Shape fallback = InkShapeRecognizer.fitFallbackCircleOrEllipse(raw, count);
+            if (fallback != null) {
+                discardStockStroke(mCurrentActivity);
+                mOverlayView.setStrokeColor(mCurrentColor);
+                mOverlayView.setStrokeWidth(mCurrentWidth);
+                if (fallback.kind == InkShapeRecognizer.Kind.ELLIPSE) {
+                    mOverlayView.showRecognizedEllipse(
+                            fallback.centerX, fallback.centerY,
+                            fallback.radiusX, fallback.radiusY, fallback.angleRad);
+                    mRecognized = true;
+                    showToast(mCurrentActivity, "⬭ 타원 자동 완성");
+                } else {
+                    mOverlayView.showRecognizedCircle(fallback.centerX, fallback.centerY, fallback.radius);
+                    mRecognized = true;
+                    showToast(mCurrentActivity, "⭕ 원 자동 완성");
+                }
                 return;
             }
         }

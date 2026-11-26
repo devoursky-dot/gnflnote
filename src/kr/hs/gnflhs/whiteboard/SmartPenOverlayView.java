@@ -12,12 +12,14 @@ import android.view.View;
  * 순정 칠판 레이어에 진짜 판서 객체로 직접 합쳐집니다.
  */
 public class SmartPenOverlayView extends View {
-    public enum ShapeType { NONE, LINE, CIRCLE, POLYGON, SPLINE }
+    public enum ShapeType { NONE, LINE, CIRCLE, ELLIPSE, POLYGON, SPLINE }
 
     private final Paint mPaint;
     private ShapeType mActiveType = ShapeType.NONE;
     private float mLineAx, mLineAy, mLineBx, mLineBy;
     private float mCircleCx, mCircleCy, mCircleR;
+    private float mEllipseRx, mEllipseRy, mEllipseAngleRad;
+    private final RectF mEllipseRect = new RectF();
     private float[] mPolyCorners = null;
     private Path mActiveSplinePath = null;
 
@@ -65,8 +67,17 @@ public class SmartPenOverlayView extends View {
         postInvalidate();
     }
 
+    public void showRecognizedEllipse(float cx, float cy, float rx, float ry, float angleRad) {
+        mActiveType = ShapeType.ELLIPSE;
+        mCircleCx = cx; mCircleCy = cy;
+        mEllipseRx = rx; mEllipseRy = ry;
+        mEllipseAngleRad = angleRad;
+        mActiveSplinePath = null;
+        postInvalidate();
+    }
+
     public void translateRecognizedCircle(float dx, float dy) {
-        if (mActiveType == ShapeType.CIRCLE) {
+        if (mActiveType == ShapeType.CIRCLE || mActiveType == ShapeType.ELLIPSE) {
             mCircleCx += dx;
             mCircleCy += dy;
             postInvalidate();
@@ -116,6 +127,9 @@ public class SmartPenOverlayView extends View {
     public float getCircleCx() { return mCircleCx; }
     public float getCircleCy() { return mCircleCy; }
     public float getCircleR() { return mCircleR; }
+    public float getEllipseRx() { return mEllipseRx; }
+    public float getEllipseRy() { return mEllipseRy; }
+    public float getEllipseAngleRad() { return mEllipseAngleRad; }
     public float[] getPolyCorners() { return mPolyCorners; }
 
     @Override
@@ -126,6 +140,13 @@ public class SmartPenOverlayView extends View {
             canvas.drawLine(mLineAx, mLineAy, mLineBx, mLineBy, mPaint);
         } else if (mActiveType == ShapeType.CIRCLE) {
             canvas.drawCircle(mCircleCx, mCircleCy, mCircleR, mPaint);
+        } else if (mActiveType == ShapeType.ELLIPSE) {
+            canvas.save();
+            canvas.translate(mCircleCx, mCircleCy);
+            canvas.rotate((float) Math.toDegrees(mEllipseAngleRad));
+            mEllipseRect.set(-mEllipseRx, -mEllipseRy, mEllipseRx, mEllipseRy);
+            canvas.drawOval(mEllipseRect, mPaint);
+            canvas.restore();
         } else if (mActiveType == ShapeType.POLYGON && mPolyCorners != null && mPolyCorners.length >= 6) {
             Paint.Join prevJoin = mPaint.getStrokeJoin();
             mPaint.setStrokeJoin(Paint.Join.MITER);
