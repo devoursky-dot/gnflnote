@@ -26,16 +26,21 @@ public class DietManager {
     private static final String TAG = "DietManager";
     private static final Handler sHandler = new Handler(Looper.getMainLooper());
 
+    // 크래시하거나 동작하지 않는 항목 (메인 툴바·팝업 모두에서 완전 제거)
     private static final String[] REMOVED_IDS = new String[] {
             "explore_edu_toolbar_share",
             "explore_edu_toolbar_mind",
             "explore_edu_toolbar_pair_mode",
-            "explore_edu_toolbar_form",
-            "explore_edu_toolbar_note",
-            "explore_edu_toolbar_grid",
-            "explore_edu_toolbar_ruler",
             "explore_edu_toolbar_exit",
             "recognize_text"
+    };
+
+    // 정상 동작하는 보조 도구: 메인 하단 툴바에서는 숨겨 깔끔하게 유지하고, '더 보기(...)' 팝업 안에서는 그대로 표시!
+    private static final String[] MAIN_TOOLBAR_ONLY_HIDDEN_IDS = new String[] {
+            "explore_edu_toolbar_ruler",
+            "explore_edu_toolbar_form",
+            "explore_edu_toolbar_note",
+            "explore_edu_toolbar_grid"
     };
 
     private static final String[] REMOVED_TEXTS = new String[] {
@@ -43,10 +48,7 @@ public class DietManager {
             "마인드 매핑",
             "공유 클라우드",
             "페어링 모드",
-            "페어링모드",
-            "시트",
-            "GNFLNOTE",
-            "그리드"
+            "페어링모드"
     };
 
     // 숨김 메뉴(메인 메뉴 팝업)에서만 임시로 UI를 숨기는 항목 (기능 보존, 다이얼로그 버튼은 건드리지 않음)
@@ -278,6 +280,15 @@ public class DietManager {
                     if (target.equals(entryName)) {
                         hideViewCompletely(root);
                         return;
+                    }
+                }
+                // 자/시트/메모/그리드 등 보조 도구는 메인 툴바에서만 숨기고, '더 보기' 팝업에서는 그대로 유지!
+                if (root.getRootView() == activity.getWindow().getDecorView()) {
+                    for (String target : MAIN_TOOLBAR_ONLY_HIDDEN_IDS) {
+                        if (target.equals(entryName)) {
+                            hideViewCompletely(root);
+                            return;
+                        }
                     }
                 }
             } catch (Throwable ignored) {}
