@@ -44,12 +44,16 @@ $srcFiles = @(
     "$WorkDir\src\kr\hs\gnflhs\whiteboard\PdfLinkQrManager.java",
     "$WorkDir\src\kr\hs\gnflhs\whiteboard\DietManager.java",
     "$WorkDir\src\kr\hs\gnflhs\whiteboard\SmartPenManager.java",
-    "$WorkDir\src\kr\hs\gnflhs\whiteboard\PdfPicker.java"
+    "$WorkDir\src\kr\hs\gnflhs\whiteboard\PdfPicker.java",
+    "$WorkDir\src\kr\hs\gnflhs\whiteboard\UpdateBootstrap.java"
 )
 
 Write-Host "[1/3] Compiling OTA hot-update Java sources (v$PatchName / code=$PatchVersion)..."
 & "$JdkBin\bin\javac.exe" -encoding UTF-8 -cp "$AndroidJar;$ZxingJar" -d "$OtaBuild\classes" $srcFiles
 if ($LASTEXITCODE -ne 0) { throw "OTA javac compilation failed" }
+
+# UpdateBootstrap은 Base APK 전용 부트스트래퍼이므로 OTA DEX에서 제외
+Get-ChildItem -Path "$OtaBuild\classes\kr\hs\gnflhs\whiteboard" -Filter "UpdateBootstrap*.class" | Remove-Item -Force
 
 Write-Host "[2/3] Packaging standalone gnfl_patch.dex..."
 $otaJar = "$OtaBuild\ota_classes.jar"
@@ -63,11 +67,13 @@ Copy-Item "$OtaBuild\dex\classes.dex" $dexOut -Force
 
 $hash = (Get-FileHash -Path $dexOut -Algorithm SHA256).Hash.ToLower()
 $size = (Get-Item $dexOut).Length
+$buildDate = Get-Date -Format "yyyy-MM-dd HH:mm"
 
-Write-Host "[3/3] Generating ota/version.json (size=$size bytes, sha256=$hash)..."
+Write-Host "[3/3] Generating ota/version.json (size=$size bytes, date=$buildDate, sha256=$hash)..."
 $meta = [ordered]@{
     patchVersion       = $PatchVersion
     patchName          = $PatchName
+    buildDate          = $buildDate
     minBaseVersionCode = $MinBaseVersionCode
     dexUrl             = "https://raw.githubusercontent.com/devoursky-dot/gnflnote/main/ota/gnfl_patch.dex"
     sha256             = $hash

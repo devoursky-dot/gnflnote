@@ -1,11 +1,28 @@
 package kr.hs.gnflhs.whiteboard;
 
 import android.app.Activity;
+import android.app.AlarmManager;
+import android.app.Dialog;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Log;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.Window;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 
 import org.json.JSONObject;
 
@@ -25,14 +42,7 @@ import java.util.Locale;
 import dalvik.system.DexClassLoader;
 
 /**
- * GNFL NOTE V2.0 - 초경량 GitHub OTA 핫-업데이트 부트스트래퍼
- *
- * - Base APK(280MB)의 PlainWhiteboardActivity 후크 2곳(dispatchTouchEvent, onActivityResult)의
- *   유일한 진입점 역할을 수행합니다.
- * - 실행 시 filesDir/gnfl_ota/ 에 검증된 최신 패치 DEX(~100KB)가 있으면 Child-First DexClassLoader로
- *   즉시 로드하고, 없으면 APK 내장 기본 클래스로 100% 안전하게 폴백합니다.
- * - 백그라운드에서 GitHub(devoursky-dot/gnflnote)의 ota/version.json을 확인해 새 패치가 있으면
- *   SHA-256 검증 후 다운로드하고, 상단 배너로 안내한 뒤 다음 실행 시 자동 적용합니다.
+ * GNFL NOTE V2.0 - 초경량 GitHub OTA 핫-업데이트 부트스트래퍼 + 수동 업데이트/자동 재실행 UI
  */
 public class UpdateBootstrap {
     private static final String TAG = "UpdateBootstrap";
@@ -40,6 +50,7 @@ public class UpdateBootstrap {
     public static final int BASE_VERSION_CODE = 20900200;
     public static final int BUILTIN_PATCH_VERSION = 200;
     public static final String BUILTIN_PATCH_NAME = "2.0.0";
+    public static final String BUILTIN_BUILD_DATE = "2026-11-26 16:30";
 
     private static final String OTA_DIR_NAME = "gnfl_ota";
     private static final String ACTIVE_META_NAME = "active_patch.json";
@@ -47,9 +58,10 @@ public class UpdateBootstrap {
             "https://raw.githubusercontent.com/devoursky-dot/gnflnote/main/ota/version.json";
 
     private static volatile boolean sInitialized = false;
-    private static volatile boolean sUpdateCheckStarted = false;
+    private static volatile long sLastCheckMs = 0L;
     private static volatile int sActivePatchVersion = BUILTIN_PATCH_VERSION;
     private static volatile String sActivePatchName = BUILTIN_PATCH_NAME;
+    private static volatile String sActiveBuildDate = BUILTIN_BUILD_DATE;
     private static volatile boolean sUsingOtaDex = false;
 
     private static ClassLoader sOtaClassLoader = null;
@@ -57,11 +69,6 @@ public class UpdateBootstrap {
     private static Method sOtaOnActivityResult = null;
     private static Method sOtaShowTopToast = null;
 
-    /**
-     * Child-First DexClassLoader:
-     * kr.hs.gnflhs.whiteboard.* 기능 클래스(UpdateBootstrap 제외)는
-     * Base APK보다 다운로드된 OTA 패치 DEX에서 먼저 로드합니다.
-     */
     private static final class ChildFirstDexClassLoader extends DexClassLoader {
         public ChildFirstDexClassLoader(String dexPath, String optimizedDirectory, String librarySearchPath, ClassLoader parent) {
             super(dexPath, optimizedDirectory, librarySearchPath, parent);
@@ -96,13 +103,14 @@ public class UpdateBootstrap {
         return sActivePatchName;
     }
 
+    public static String getActiveBuildDate() {
+        return sActiveBuildDate;
+    }
+
     public static boolean isUsingOtaDex() {
         return sUsingOtaDex;
     }
 
-    /**
-     * PlainWhiteboardActivity.onActivityResult 후크 진입점
-     */
     public static void onActivityResult(Activity activity, int requestCode, int resultCode, Intent data) {
         ensureInitialized(activity);
         if (sOtaOnActivityResult != null) {
@@ -116,9 +124,6 @@ public class UpdateBootstrap {
         PdfPicker.onActivityResult(activity, requestCode, resultCode, data);
     }
 
-    /**
-     * PlainWhiteboardActivity.dispatchTouchEvent 후크 진입점
-     */
     public static boolean dispatchTouchEvent(Activity activity, MotionEvent ev) {
         ensureInitialized(activity);
         if (sOtaDispatchTouch != null) {
@@ -133,23 +138,26 @@ public class UpdateBootstrap {
     }
 
     private static synchronized void ensureInitialized(final Activity activity) {
-        if (sInitialized) return;
-        sInitialized = true;
         if (activity == null) return;
-
         final Context appCtx = activity.getApplicationContext();
-        try {
-            loadLocalOtaPatchIfValid(activity, appCtx);
-        } catch (Throwable t) {
-            Log.e(TAG, "Failed to load local OTA patch, using built-in", t);
-            sOtaClassLoader = null;
-            sOtaDispatchTouch = null;
-            sOtaOnActivityResult = null;
-            sUsingOtaDex = false;
+
+        if (!sInitialized) {
+            sInitialized = true;
+            try {
+                loadLocalOtaPatchIfValid(activity, appCtx);
+            } catch (Throwable t) {
+                Log.e(TAG, "Failed to load local OTA patch, using built-in", t);
+                sOtaClassLoader = null;
+                sOtaDispatchTouch = null;
+                sOtaOnActivityResult = null;
+                sUsingOtaDex = false;
+            }
         }
 
-        if (!sUpdateCheckStarted) {
-            sUpdateCheckStarted = true;
+        // 프로세스가 살아 있는 상태로 재진입해도 60초가 지났으면 백그라운드 체크 재수행
+        long now = System.currentTimeMillis();
+        if (now - sLastCheckMs > 60_000L) {
+            sLastCheckMs = now;
             startBackgroundUpdateCheck(activity, appCtx);
         }
     }
@@ -158,40 +166,38 @@ public class UpdateBootstrap {
         File otaDir = new File(appCtx.getFilesDir(), OTA_DIR_NAME);
         File metaFile = new File(otaDir, ACTIVE_META_NAME);
         if (!metaFile.exists()) {
-            Log.i(TAG, "No local OTA patch; running built-in v" + BUILTIN_PATCH_NAME + " (" + BUILTIN_PATCH_VERSION + ")");
+            Log.i(TAG, "No local OTA patch; running built-in v" + BUILTIN_PATCH_NAME + " (" + BUILTIN_BUILD_DATE + ")");
             return;
         }
         try {
             JSONObject meta = new JSONObject(readTextFile(metaFile));
             int patchVer = meta.optInt("patchVersion", 0);
             String patchName = meta.optString("patchName", String.valueOf(patchVer));
+            String buildDate = meta.optString("buildDate", BUILTIN_BUILD_DATE);
             int minBase = meta.optInt("minBaseVersionCode", 0);
             String dexName = meta.optString("dexFile", "");
             String expectedSha = meta.optString("sha256", "");
             boolean justUpdated = meta.optBoolean("justUpdated", false);
 
             if (patchVer <= BUILTIN_PATCH_VERSION || minBase > BASE_VERSION_CODE || dexName.isEmpty()) {
-                Log.i(TAG, "Local OTA patch v" + patchName + " superseded by built-in v" + BUILTIN_PATCH_NAME);
                 return;
             }
 
             File dexFile = new File(otaDir, dexName);
             if (!dexFile.exists() || dexFile.length() < 1024) {
-                Log.w(TAG, "OTA dex file missing: " + dexFile.getAbsolutePath());
                 return;
             }
 
             if (!expectedSha.isEmpty()) {
                 String actualSha = computeSha256(dexFile);
                 if (!expectedSha.equalsIgnoreCase(actualSha)) {
-                    Log.e(TAG, "OTA dex SHA-256 mismatch! expected=" + expectedSha + " actual=" + actualSha);
+                    Log.e(TAG, "OTA dex SHA-256 mismatch!");
                     dexFile.delete();
                     metaFile.delete();
                     return;
                 }
             }
 
-            // Android 14(API 34)+ 동적 코드 로딩 보안 정책 준수: 반드시 read-only 설정
             dexFile.setReadOnly();
 
             File optDir = new File(appCtx.getCodeCacheDir(), "gnfl_ota_opt");
@@ -220,18 +226,314 @@ public class UpdateBootstrap {
             sOtaShowTopToast = mToast;
             sActivePatchVersion = patchVer;
             sActivePatchName = patchName;
+            sActiveBuildDate = buildDate;
             sUsingOtaDex = true;
 
-            Log.i(TAG, "Successfully loaded OTA patch v" + patchName + " (patchVersion=" + patchVer + ", " + dexFile.length() + " bytes)");
+            Log.i(TAG, "Successfully loaded OTA patch v" + patchName + " (" + buildDate + ", " + dexFile.length() + " bytes)");
 
             if (justUpdated) {
                 meta.put("justUpdated", false);
                 writeTextFile(metaFile, meta.toString());
-                final String appliedMsg = "✨ GNFLNOTE v" + patchName + " 자동 업데이트가 적용되었습니다!";
-                showBannerDelayed(activity, appliedMsg, true, 1200L);
+                final String appliedMsg = "✨ GNFLNOTE v" + patchName + " (" + buildDate + ") 업데이트 완료!";
+                showBannerDelayed(activity, appliedMsg, true, 900L);
             }
         } catch (Throwable t) {
             Log.e(TAG, "Error loading OTA patch", t);
+        }
+    }
+
+    /**
+     * 메뉴 팝업의 '업데이트 확인' 클릭 시 표시되는 수동 업데이트 다이얼로그:
+     * - 현재 설치 버전 & 배포일 표시
+     * - GitHub 최신 버전 & 배포일 & 변경 내역 실시간 조회
+     * - [지금 업데이트 및 재시작] 클릭 시 193KB 다운로드 -> SHA-256 검증 -> 프로세스 자동 재실행!
+     */
+    public static void showManualUpdateDialog(final Activity activity) {
+        if (activity == null) return;
+        final Handler ui = new Handler(Looper.getMainLooper());
+        ui.post(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final Dialog dlg = new Dialog(activity);
+                    dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
+                    dlg.setCanceledOnTouchOutside(true);
+
+                    LinearLayout card = new LinearLayout(activity);
+                    card.setOrientation(LinearLayout.VERTICAL);
+                    card.setPadding(dp(activity, 22), dp(activity, 20), dp(activity, 22), dp(activity, 18));
+                    GradientDrawable bg = new GradientDrawable();
+                    bg.setColor(Color.WHITE);
+                    bg.setCornerRadius(dp(activity, 14));
+                    bg.setStroke(dp(activity, 1), Color.parseColor("#E2E8F0"));
+                    card.setBackground(bg);
+
+                    TextView title = new TextView(activity);
+                    title.setText("🔄 GNFLNOTE 업데이트");
+                    title.setTextColor(Color.parseColor("#0F172A"));
+                    title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f);
+                    title.setTypeface(Typeface.DEFAULT_BOLD);
+                    card.addView(title);
+
+                    TextView curInfo = new TextView(activity);
+                    curInfo.setText("현재 버전: v" + sActivePatchName + "  (" + sActiveBuildDate + ")");
+                    curInfo.setTextColor(Color.parseColor("#334155"));
+                    curInfo.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
+                    curInfo.setTypeface(Typeface.DEFAULT_BOLD);
+                    LinearLayout.LayoutParams curLp = new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    curLp.topMargin = dp(activity, 12);
+                    card.addView(curInfo, curLp);
+
+                    final TextView statusTxt = new TextView(activity);
+                    statusTxt.setText("GitHub에서 최신 배포본을 확인하는 중...");
+                    statusTxt.setTextColor(Color.parseColor("#64748B"));
+                    statusTxt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
+                    statusTxt.setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10));
+                    GradientDrawable stBg = new GradientDrawable();
+                    stBg.setColor(Color.parseColor("#F8FAFC"));
+                    stBg.setCornerRadius(dp(activity, 8));
+                    stBg.setStroke(dp(activity, 1), Color.parseColor("#E2E8F0"));
+                    statusTxt.setBackground(stBg);
+                    LinearLayout.LayoutParams stLp = new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    stLp.topMargin = dp(activity, 10);
+                    stLp.bottomMargin = dp(activity, 16);
+                    card.addView(statusTxt, stLp);
+
+                    LinearLayout btnRow = new LinearLayout(activity);
+                    btnRow.setOrientation(LinearLayout.HORIZONTAL);
+                    btnRow.setGravity(Gravity.END);
+
+                    final TextView btnClose = new TextView(activity);
+                    btnClose.setText("닫기");
+                    btnClose.setTextColor(Color.parseColor("#475569"));
+                    btnClose.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f);
+                    btnClose.setGravity(Gravity.CENTER);
+                    btnClose.setPadding(dp(activity, 18), dp(activity, 10), dp(activity, 18), dp(activity, 10));
+                    GradientDrawable closeBg = new GradientDrawable();
+                    closeBg.setColor(Color.parseColor("#F1F5F9"));
+                    closeBg.setCornerRadius(dp(activity, 8));
+                    btnClose.setBackground(closeBg);
+                    btnClose.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            dlg.dismiss();
+                        }
+                    });
+                    btnRow.addView(btnClose);
+
+                    final TextView btnUpdate = new TextView(activity);
+                    btnUpdate.setText("지금 업데이트 및 재시작");
+                    btnUpdate.setTextColor(Color.WHITE);
+                    btnUpdate.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f);
+                    btnUpdate.setTypeface(Typeface.DEFAULT_BOLD);
+                    btnUpdate.setGravity(Gravity.CENTER);
+                    btnUpdate.setPadding(dp(activity, 18), dp(activity, 10), dp(activity, 18), dp(activity, 10));
+                    GradientDrawable updBg = new GradientDrawable();
+                    updBg.setColor(Color.parseColor("#00B589"));
+                    updBg.setCornerRadius(dp(activity, 8));
+                    btnUpdate.setBackground(updBg);
+                    btnUpdate.setVisibility(View.GONE);
+                    LinearLayout.LayoutParams updLp = new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    updLp.leftMargin = dp(activity, 10);
+                    btnRow.addView(btnUpdate, updLp);
+
+                    card.addView(btnRow, new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+                    dlg.setContentView(card, new ViewGroup.LayoutParams(dp(activity, 370), ViewGroup.LayoutParams.WRAP_CONTENT));
+                    if (dlg.getWindow() != null) {
+                        dlg.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+                    }
+                    dlg.show();
+
+                    // 백그라운드에서 GitHub version.json 실시간 확인
+                    new Thread(new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                byte[] metaBytes = httpGetBytes(VERSION_JSON_URL + "?t=" + System.currentTimeMillis(), 8000);
+                                if (metaBytes == null || metaBytes.length == 0) {
+                                    ui.post(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            statusTxt.setText("⚠️ GitHub 서버에 연결할 수 없습니다.\n인터넷 연결 상태를 확인해 주세요.");
+                                        }
+                                    });
+                                    return;
+                                }
+                                final JSONObject remote = new JSONObject(new String(metaBytes, StandardCharsets.UTF_8));
+                                final int remoteVer = remote.optInt("patchVersion", 0);
+                                final String remoteName = remote.optString("patchName", String.valueOf(remoteVer));
+                                final String remoteDate = remote.optString("buildDate", "-");
+                                final int minBase = remote.optInt("minBaseVersionCode", 0);
+                                final String notes = remote.optString("releaseNotes", "");
+                                final int sizeKb = Math.max(1, remote.optInt("sizeBytes", 0) / 1024);
+
+                                ui.post(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        if (remoteVer <= sActivePatchVersion) {
+                                            statusTxt.setText("✅ 이미 최신 버전입니다.\n최신 배포본: v" + remoteName + " (" + remoteDate + ")");
+                                            statusTxt.setTextColor(Color.parseColor("#065F46"));
+                                        } else if (minBase > BASE_VERSION_CODE) {
+                                            statusTxt.setText("📦 새 앱 설치 파일(APK)이 필요합니다.\n최신: v" + remoteName + " (" + remoteDate + ")");
+                                        } else {
+                                            String info = "🆕 새 업데이트: v" + remoteName + " (" + remoteDate + ") · " + sizeKb + " KB";
+                                            if (!notes.isEmpty()) info += "\n• " + notes;
+                                            statusTxt.setText(info);
+                                            statusTxt.setTextColor(Color.parseColor("#0F172A"));
+                                            btnUpdate.setVisibility(View.VISIBLE);
+                                            btnUpdate.setOnClickListener(new View.OnClickListener() {
+                                                @Override
+                                                public void onClick(View v) {
+                                                    btnUpdate.setEnabled(false);
+                                                    btnUpdate.setText("다운로드 중...");
+                                                    statusTxt.setText("⬇️ v" + remoteName + " (" + sizeKb + " KB) 다운로드 및 검증 중...");
+                                                    new Thread(new Runnable() {
+                                                        @Override
+                                                        public void run() {
+                                                            final boolean ok = downloadAndInstallPatch(activity.getApplicationContext(), remote);
+                                                            ui.post(new Runnable() {
+                                                                @Override
+                                                                public void run() {
+                                                                    if (ok) {
+                                                                        statusTxt.setText("✅ 다운로드 완료! 앱을 자동으로 재시작합니다...");
+                                                                        dlg.dismiss();
+                                                                        restartAppCleanly(activity);
+                                                                    } else {
+                                                                        btnUpdate.setEnabled(true);
+                                                                        btnUpdate.setText("다시 시도");
+                                                                        statusTxt.setText("⚠️ 다운로드 또는 무결성 검증에 실패했습니다.");
+                                                                    }
+                                                                }
+                                                            });
+                                                        }
+                                                    }, "GnflManualOtaDownload").start();
+                                                }
+                                            });
+                                        }
+                                    }
+                                });
+                            } catch (Throwable t) {
+                                ui.post(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        statusTxt.setText("⚠️ 업데이트 확인 오류: " + t.getMessage());
+                                    }
+                                });
+                            }
+                        }
+                    }, "GnflManualOtaCheck").start();
+                } catch (Throwable t) {
+                    Log.e(TAG, "showManualUpdateDialog failed", t);
+                }
+            }
+        });
+    }
+
+    private static boolean downloadAndInstallPatch(Context appCtx, JSONObject remote) {
+        try {
+            int remoteVer = remote.optInt("patchVersion", 0);
+            String remoteName = remote.optString("patchName", String.valueOf(remoteVer));
+            String remoteDate = remote.optString("buildDate", BUILTIN_BUILD_DATE);
+            int minBase = remote.optInt("minBaseVersionCode", 0);
+            String dexUrl = remote.optString("dexUrl", "");
+            String expectedSha = remote.optString("sha256", "");
+            if (dexUrl.isEmpty() || expectedSha.isEmpty()) return false;
+
+            byte[] dexBytes = httpGetBytes(dexUrl + "?t=" + System.currentTimeMillis(), 15000);
+            if (dexBytes == null || dexBytes.length < 1024) return false;
+
+            File otaDir = new File(appCtx.getFilesDir(), OTA_DIR_NAME);
+            if (!otaDir.exists()) otaDir.mkdirs();
+
+            File tmpFile = new File(otaDir, "tmp_patch_" + remoteVer + ".dex");
+            FileOutputStream fos = new FileOutputStream(tmpFile);
+            try {
+                fos.write(dexBytes);
+                fos.flush();
+            } finally {
+                try { fos.close(); } catch (Throwable ignored) {}
+            }
+
+            String actualSha = computeSha256(tmpFile);
+            if (!expectedSha.equalsIgnoreCase(actualSha)) {
+                Log.e(TAG, "Downloaded OTA dex SHA-256 mismatch! expected=" + expectedSha + " actual=" + actualSha);
+                tmpFile.delete();
+                return false;
+            }
+
+            String finalDexName = "gnfl_patch_" + remoteVer + ".dex";
+            File finalDex = new File(otaDir, finalDexName);
+            if (finalDex.exists()) {
+                finalDex.setWritable(true);
+                finalDex.delete();
+            }
+            if (!tmpFile.renameTo(finalDex)) {
+                tmpFile.delete();
+                return false;
+            }
+            finalDex.setReadOnly();
+
+            JSONObject activeMeta = new JSONObject();
+            activeMeta.put("patchVersion", remoteVer);
+            activeMeta.put("patchName", remoteName);
+            activeMeta.put("buildDate", remoteDate);
+            activeMeta.put("minBaseVersionCode", minBase);
+            activeMeta.put("dexFile", finalDexName);
+            activeMeta.put("sha256", actualSha);
+            activeMeta.put("justUpdated", true);
+            writeTextFile(new File(otaDir, ACTIVE_META_NAME), activeMeta.toString());
+
+            // 이전 버전 DEX 정리
+            File[] files = otaDir.listFiles();
+            if (files != null) {
+                for (File f : files) {
+                    String n = f.getName();
+                    if (n.startsWith("gnfl_patch_") && n.endsWith(".dex") && !n.equals(finalDexName)) {
+                        f.setWritable(true);
+                        f.delete();
+                    }
+                }
+            }
+            Log.i(TAG, "Downloaded & verified OTA patch v" + remoteName + " (" + remoteDate + ", " + dexBytes.length + " bytes)");
+            return true;
+        } catch (Throwable t) {
+            Log.e(TAG, "downloadAndInstallPatch failed", t);
+            return false;
+        }
+    }
+
+    /**
+     * 새 OTA DEX를 깨끗하게 로드하기 위해 앱을 0.45초 뒤 자동 재실행하도록 예약하고 현재 프로세스를 종료합니다.
+     */
+    private static void restartAppCleanly(final Activity activity) {
+        try {
+            Context appCtx = activity.getApplicationContext();
+            Intent launch = new Intent(appCtx, activity.getClass());
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            int flags = PendingIntent.FLAG_CANCEL_CURRENT;
+            if (Build.VERSION.SDK_INT >= 23) {
+                flags |= PendingIntent.FLAG_IMMUTABLE;
+            }
+            PendingIntent pi = PendingIntent.getActivity(appCtx, 0x7A01, launch, flags);
+            AlarmManager am = (AlarmManager) appCtx.getSystemService(Context.ALARM_SERVICE);
+            if (am != null) {
+                am.set(AlarmManager.ELAPSED_REALTIME, SystemClock.elapsedRealtime() + 450L, pi);
+            }
+            try { activity.finishAffinity(); } catch (Throwable ignored) { activity.finish(); }
+            new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    android.os.Process.killProcess(android.os.Process.myPid());
+                    System.exit(0);
+                }
+            }, 120L);
+        } catch (Throwable t) {
+            Log.e(TAG, "restartAppCleanly failed", t);
         }
     }
 
@@ -241,96 +543,25 @@ public class UpdateBootstrap {
             public void run() {
                 try {
                     Thread.sleep(2500L);
-                    String urlStr = VERSION_JSON_URL + "?t=" + System.currentTimeMillis();
-                    byte[] metaBytes = httpGetBytes(urlStr, 7000);
-                    if (metaBytes == null || metaBytes.length == 0) {
-                        Log.i(TAG, "OTA check skipped (offline or empty response)");
-                        return;
-                    }
+                    byte[] metaBytes = httpGetBytes(VERSION_JSON_URL + "?t=" + System.currentTimeMillis(), 7000);
+                    if (metaBytes == null || metaBytes.length == 0) return;
                     JSONObject remote = new JSONObject(new String(metaBytes, StandardCharsets.UTF_8));
                     int remoteVer = remote.optInt("patchVersion", 0);
                     String remoteName = remote.optString("patchName", String.valueOf(remoteVer));
+                    String remoteDate = remote.optString("buildDate", "");
                     int minBase = remote.optInt("minBaseVersionCode", 0);
-                    String dexUrl = remote.optString("dexUrl", "");
-                    String expectedSha = remote.optString("sha256", "");
 
                     Log.i(TAG, "OTA check: remote=v" + remoteName + "(" + remoteVer + "), active=v"
-                            + sActivePatchName + "(" + sActivePatchVersion + "), base=" + BASE_VERSION_CODE);
+                            + sActivePatchName + "(" + sActivePatchVersion + ")");
 
-                    if (remoteVer <= sActivePatchVersion) {
-                        return;
-                    }
-                    if (minBase > BASE_VERSION_CODE) {
-                        Log.i(TAG, "Remote patch requires newer base APK (minBase=" + minBase + ")");
-                        return;
-                    }
-                    if (dexUrl.isEmpty() || expectedSha.isEmpty()) {
-                        Log.w(TAG, "Remote version.json missing dexUrl or sha256");
-                        return;
-                    }
+                    if (remoteVer <= sActivePatchVersion || minBase > BASE_VERSION_CODE) return;
 
-                    byte[] dexBytes = httpGetBytes(dexUrl + "?t=" + System.currentTimeMillis(), 15000);
-                    if (dexBytes == null || dexBytes.length < 1024) {
-                        Log.w(TAG, "OTA dex download failed or too small");
-                        return;
+                    if (downloadAndInstallPatch(appCtx, remote)) {
+                        String datePart = remoteDate.isEmpty() ? "" : (" (" + remoteDate + ")");
+                        showBannerDelayed(activity,
+                                "⬇️ 새 업데이트 v" + remoteName + datePart + " 준비 완료! 메뉴 → 업데이트에서 재시작하세요.",
+                                true, 200L);
                     }
-
-                    File otaDir = new File(appCtx.getFilesDir(), OTA_DIR_NAME);
-                    if (!otaDir.exists()) otaDir.mkdirs();
-
-                    File tmpFile = new File(otaDir, "tmp_patch_" + remoteVer + ".dex");
-                    FileOutputStream fos = new FileOutputStream(tmpFile);
-                    try {
-                        fos.write(dexBytes);
-                        fos.flush();
-                    } finally {
-                        try { fos.close(); } catch (Throwable ignored) {}
-                    }
-
-                    String actualSha = computeSha256(tmpFile);
-                    if (!expectedSha.equalsIgnoreCase(actualSha)) {
-                        Log.e(TAG, "Downloaded OTA dex SHA-256 mismatch! expected=" + expectedSha + " actual=" + actualSha);
-                        tmpFile.delete();
-                        return;
-                    }
-
-                    String finalDexName = "gnfl_patch_" + remoteVer + ".dex";
-                    File finalDex = new File(otaDir, finalDexName);
-                    if (finalDex.exists()) {
-                        finalDex.setWritable(true);
-                        finalDex.delete();
-                    }
-                    if (!tmpFile.renameTo(finalDex)) {
-                        tmpFile.delete();
-                        return;
-                    }
-                    finalDex.setReadOnly();
-
-                    JSONObject activeMeta = new JSONObject();
-                    activeMeta.put("patchVersion", remoteVer);
-                    activeMeta.put("patchName", remoteName);
-                    activeMeta.put("minBaseVersionCode", minBase);
-                    activeMeta.put("dexFile", finalDexName);
-                    activeMeta.put("sha256", actualSha);
-                    activeMeta.put("justUpdated", true);
-                    writeTextFile(new File(otaDir, ACTIVE_META_NAME), activeMeta.toString());
-
-                    // 이전 버전 DEX 파일 정리
-                    File[] files = otaDir.listFiles();
-                    if (files != null) {
-                        for (File f : files) {
-                            String n = f.getName();
-                            if (n.startsWith("gnfl_patch_") && n.endsWith(".dex") && !n.equals(finalDexName)) {
-                                f.setWritable(true);
-                                f.delete();
-                            }
-                        }
-                    }
-
-                    Log.i(TAG, "Downloaded & verified OTA patch v" + remoteName + " (" + dexBytes.length + " bytes)");
-                    showBannerDelayed(activity,
-                            "⬇️ 새 업데이트(v" + remoteName + ") 다운로드 완료! 앱을 다시 열면 자동 적용됩니다.",
-                            true, 200L);
                 } catch (Throwable t) {
                     Log.w(TAG, "Background OTA update check failed: " + t.getMessage());
                 }
@@ -342,7 +573,7 @@ public class UpdateBootstrap {
 
     private static void showBannerDelayed(final Activity activity, final String msg, final boolean isLong, long delayMs) {
         if (activity == null) return;
-        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(new Runnable() {
+        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
             @Override
             public void run() {
                 try {
@@ -428,5 +659,9 @@ public class UpdateBootstrap {
         } finally {
             try { fos.close(); } catch (Throwable ignored) {}
         }
+    }
+
+    private static int dp(Context ctx, int v) {
+        return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, ctx.getResources().getDisplayMetrics());
     }
 }

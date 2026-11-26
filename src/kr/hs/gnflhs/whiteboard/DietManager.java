@@ -52,11 +52,11 @@ public class DietManager {
     };
 
     // 숨김 메뉴(메인 메뉴 팝업)에서만 임시로 UI를 숨기는 항목 (기능 보존, 다이얼로그 버튼은 건드리지 않음)
+    // 참고: "저장" 행은 '업데이트 확인' 메뉴로 재활용합니다!
     private static final String[] HIDDEN_MAIN_MENU_TEXTS = new String[] {
             "새로 만들기",
             "새로만들기",
             "열기",
-            "저장",
             "다른 이름으로 저장",
             "다른이름으로저장",
             "내보내기"
@@ -337,6 +337,39 @@ public class DietManager {
                         hideViewCompletely(findRowContainer(root));
                         return;
                     }
+                }
+
+                // 기존 '저장' 행을 메인 메뉴에서 '업데이트 확인 (배포일 표시 + 원클릭 자동 재실행)' 메뉴로 재활용!
+                if (!(root instanceof android.widget.Button)
+                        && ("저장".equals(txt) || txt.startsWith("업데이트"))
+                        && isInsideMainMenuPopup(root)) {
+                    String verLabel = "업데이트 (" + UpdateBootstrap.getActivePatchName() + ")";
+                    ((TextView) root).setText(verLabel);
+                    final View row = findRowContainer(root);
+                    row.setVisibility(View.VISIBLE);
+                    View.OnTouchListener updateTouch = new View.OnTouchListener() {
+                        @Override
+                        public boolean onTouch(View v, android.view.MotionEvent event) {
+                            if (event.getActionMasked() == android.view.MotionEvent.ACTION_UP) {
+                                PdfRecentSubmenu.dismissIfShowing();
+                                try {
+                                    View popupRoot = row.getRootView();
+                                    if (popupRoot != null) {
+                                        long now = android.os.SystemClock.uptimeMillis();
+                                        android.view.MotionEvent ev = android.view.MotionEvent.obtain(
+                                                now, now, android.view.MotionEvent.ACTION_OUTSIDE, -10f, -10f, 0);
+                                        popupRoot.dispatchTouchEvent(ev);
+                                        ev.recycle();
+                                    }
+                                } catch (Throwable ignored) {}
+                                UpdateBootstrap.showManualUpdateDialog(activity);
+                            }
+                            return true;
+                        }
+                    };
+                    row.setOnTouchListener(updateTouch);
+                    root.setOnTouchListener(updateTouch);
+                    return;
                 }
 
                 // 기존 무반응 '이메일 전송' 행을 '앱 나가기'로 재활용 + 원래 나가기 아이콘(icon_exit)으로 교체

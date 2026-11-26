@@ -1,9 +1,10 @@
 {
-    "patchVersion":  203,
-    "patchName":  "2.0.3",
+    "patchVersion":  204,
+    "patchName":  "2.0.4",
+    "buildDate":  "2026-11-26 16:32",
     "minBaseVersionCode":  20900200,
     "dexUrl":  "https://raw.githubusercontent.com/devoursky-dot/gnflnote/main/ota/gnfl_patch.dex",
-    "sha256":  "eb73834e79717435ad592e54fd7067717e99d18fa26c04912cb7168251843ae4",
-    "sizeBytes":  193392,
-    "releaseNotes":  "더 보기 팝업에 자·시트·메모·그리드 보조 도구 표시 및 중복 도형 제거"
+    "sha256":  "737a90f34debaaff9e0f16d75519635cf0d38359bc63f9b6bfcfb51c5cf003a5",
+    "sizeBytes":  194060,
+    "releaseNotes":  "수동 업데이트 메뉴(배포일 표시 + 자동 재시작) 및 더 보기 보조 도구 복원"
 }
