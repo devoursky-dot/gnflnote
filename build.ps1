@@ -1,10 +1,10 @@
 # ==============================================================================
-# GNFL NOTE - V1.7 APK Build Script (Native 3x Highlighter + PDF Link & QR Tap)
+# GNFL NOTE - V2.0 APK Build Script (GitHub OTA DEX Hot-Update + Full V2.0 Suite)
 # ==============================================================================
 $ErrorActionPreference = "Stop"
 
-$VersionCode = 20900170
-$VersionName = "1.7"
+$VersionCode = 20900200
+$VersionName = "2.0"
 
 $JdkBin     = "C:\Program Files\Android\Android Studio\jbr"
 $AndroidSdk = "C:\Users\Notebook\AppData\Local\Android\Sdk"
@@ -12,11 +12,11 @@ $BuildTools = "$AndroidSdk\build-tools\36.0.0"
 $Keystore   = "C:\work\PEN\release.keystore"
 $AndroidJar = "$AndroidSdk\platforms\android-36.1\android.jar"
 
-$WorkDir    = "C:\Work\GNFLNOTE-V1.7"
+$WorkDir    = "C:\Work\GNFLNOTE-V2.0"
 $AppRoot    = "$WorkDir\app_root"
 $BuildOut   = "$WorkDir\build_out"
 $ZxingJar   = "$WorkDir\libs\zxing-core.jar"
-$FinalApk   = "C:\Work\GNFLNOTE-V1.7.apk"
+$FinalApk   = "C:\Work\GNFLNOTE-V2.0.apk"
 
 $env:JAVA_HOME = $JdkBin
 $env:PATH = "$JdkBin\bin;$BuildTools;$AndroidSdk\platform-tools;$env:PATH"
@@ -54,7 +54,8 @@ $srcFiles = @(
     "$WorkDir\src\kr\hs\gnflhs\whiteboard\PdfLinkQrManager.java",
     "$WorkDir\src\kr\hs\gnflhs\whiteboard\DietManager.java",
     "$WorkDir\src\kr\hs\gnflhs\whiteboard\SmartPenManager.java",
-    "$WorkDir\src\kr\hs\gnflhs\whiteboard\PdfPicker.java"
+    "$WorkDir\src\kr\hs\gnflhs\whiteboard\PdfPicker.java",
+    "$WorkDir\src\kr\hs\gnflhs\whiteboard\UpdateBootstrap.java"
 )
 & "$JdkBin\bin\javac.exe" -encoding UTF-8 -cp "$AndroidJar;$ZxingJar" -d $classesDir $srcFiles
 if ($LASTEXITCODE -ne 0) { throw "javac compilation failed" }
@@ -116,8 +117,7 @@ if (Test-Path "$BuildOut\aligned.apk") { Remove-Item -Force "$BuildOut\aligned.a
 if (Test-Path $FinalApk) { Remove-Item -Force $FinalApk }
 & "$BuildTools\apksigner.bat" sign --ks $Keystore --ks-pass pass:gnflhs1234 --ks-key-alias whiteboard --key-pass pass:gnflhs1234 --out $FinalApk "$BuildOut\aligned.apk"
 
-if (Test-Path "$WorkDir\GNFLNOTE-V1.6.apk") { Remove-Item -Force "$WorkDir\GNFLNOTE-V1.6.apk" }
-Copy-Item $FinalApk "$WorkDir\GNFLNOTE-V1.7.apk" -Force
+Copy-Item $FinalApk "$WorkDir\GNFLNOTE-V2.0.apk" -Force
 
 Write-Host ""
 Write-Host "=========================================================="

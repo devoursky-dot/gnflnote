@@ -49,21 +49,21 @@ def patch_dex(dex_path, output_path):
         class_idx, proto_idx, name_idx = struct.unpack_from('<HHI', data, method_ids_off + i*8)
         methods.append((types[class_idx], strings[name_idx]))
 
-    # 2. Find hook target method IDs
+    # 2. Find hook target method IDs (V2.0: route through UpdateBootstrap for GitHub OTA DEX hot-update!)
     pdf_mid = None
     pen_mid = None
     for i, m in enumerate(methods):
-        if m[0] == 'Lkr/hs/gnflhs/whiteboard/PdfPicker;' and m[1] == 'onActivityResult':
+        if m[0] == 'Lkr/hs/gnflhs/whiteboard/UpdateBootstrap;' and m[1] == 'onActivityResult':
             pdf_mid = i
-        elif m[0] == 'Lkr/hs/gnflhs/whiteboard/SmartPenManager;' and m[1] == 'dispatchTouchEvent':
+        elif m[0] == 'Lkr/hs/gnflhs/whiteboard/UpdateBootstrap;' and m[1] == 'dispatchTouchEvent':
             pen_mid = i
 
     if pdf_mid is None:
-        raise RuntimeError("PdfPicker.onActivityResult method not found in DEX!")
+        raise RuntimeError("UpdateBootstrap.onActivityResult method not found in DEX!")
     if pen_mid is None:
-        raise RuntimeError("SmartPenManager.dispatchTouchEvent method not found in DEX!")
+        raise RuntimeError("UpdateBootstrap.dispatchTouchEvent method not found in DEX!")
 
-    print(f"[+] Hook Method IDs: PdfPicker=0x{pdf_mid:04x}, SmartPenManager=0x{pen_mid:04x}")
+    print(f"[+] Hook Method IDs: UpdateBootstrap.onActivityResult=0x{pdf_mid:04x}, UpdateBootstrap.dispatchTouchEvent=0x{pen_mid:04x}")
 
     # 3. Locate PlainWhiteboardActivity methods
     pwa_on_activity_result_off = None

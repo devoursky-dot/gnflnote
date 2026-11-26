@@ -4,6 +4,7 @@ build_out/
 *.apk
 *.ap_
 *.dex
+!ota/gnfl_patch.dex
 *.class
 *.jar
 *.so

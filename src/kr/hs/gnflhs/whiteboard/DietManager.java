@@ -60,18 +60,64 @@ public class DietManager {
             "내보내기"
     };
 
+    private static java.lang.ref.WeakReference<View> sLayoutWatchedDecor;
+
     /**
      * 메인 액티비티 및 떠 있는 모든 팝업 윈도우에서 불량/불필요 기능을 즉시 숨깁니다.
      */
     public static void applyDiet(final Activity activity) {
         if (activity == null) return;
         try {
-            View decor = activity.getWindow().getDecorView();
+            final View decor = activity.getWindow().getDecorView();
             pruneViewTree(activity, decor);
             pruneAllPopupWindows(activity);
+            ensureShapeButtonVisibleIfWide(activity, decor);
+
+            if (decor != null && (sLayoutWatchedDecor == null || sLayoutWatchedDecor.get() != decor)) {
+                sLayoutWatchedDecor = new java.lang.ref.WeakReference<View>(decor);
+                decor.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+                    private int lastW = -1;
+                    @Override
+                    public void onLayoutChange(View v, int l, int t, int r, int b, int ol, int ot, int or, int ob) {
+                        int w = r - l;
+                        if (w != lastW) {
+                            lastW = w;
+                            sHandler.postDelayed(new Runnable() {
+                                @Override
+                                public void run() {
+                                    ensureShapeButtonVisibleIfWide(activity, decor);
+                                }
+                            }, 80);
+                        }
+                    }
+                });
+            }
         } catch (Throwable t) {
             Log.w(TAG, "Error in applyDiet", t);
         }
+    }
+
+    /**
+     * 전체화면(충분한 가로 여유 공간)에서는 순정 툴바가 7색 퀵 팔레트 때문에
+     * '도형' 버튼을 '더 보기(...)' 안으로 접어 숨기지 않도록 메인 툴바에 항상 표시합니다.
+     * (자유창처럼 실제로 화면이 좁을 때는 순정 '더 보기' 동작을 그대로 유지!)
+     */
+    private static void ensureShapeButtonVisibleIfWide(Activity activity, View decor) {
+        if (activity == null || decor == null) return;
+        try {
+            int w = decor.getWidth();
+            float density = activity.getResources().getDisplayMetrics().density;
+            float widthDp = (density > 0f) ? (w / density) : w;
+            if (widthDp >= 960f) {
+                View shapeBtn = ToolbarFitHelper.findViewByIdName(activity, "explore_edu_toolbar_shape");
+                if (shapeBtn != null && shapeBtn.getVisibility() != View.VISIBLE) {
+                    shapeBtn.setVisibility(View.VISIBLE);
+                    if (shapeBtn.getParent() instanceof View) {
+                        ((View) shapeBtn.getParent()).requestLayout();
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
     }
 
     /**

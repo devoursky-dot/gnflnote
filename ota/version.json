@@ -1,0 +1,9 @@
+{
+    "patchVersion":  201,
+    "patchName":  "2.0.1",
+    "minBaseVersionCode":  20900200,
+    "dexUrl":  "https://raw.githubusercontent.com/devoursky-dot/gnflnote/main/ota/gnfl_patch.dex",
+    "sha256":  "8f6069fe2772bfba1c58d41e9b6898701f74940175c17fe62a080218c5337826",
+    "sizeBytes":  193140,
+    "releaseNotes":  "V2.0.1 OTA hot-update: fullscreen Shape button fix \u0026 live OTA verification"
+}
