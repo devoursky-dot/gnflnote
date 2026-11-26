@@ -662,6 +662,7 @@ public class DietManager {
             final int leftRgId) {
         if (activity == null || parent == null) return;
         try {
+            repositionShapePopupAboveButton(activity, parent);
             View existing = parent.findViewWithTag("gnfl_shape_width_bar");
             if (existing != null) {
                 if (sSavedShapeWidth > 0f) {
@@ -804,9 +805,52 @@ public class DietManager {
                 ((android.widget.RelativeLayout.LayoutParams) colorGrid.getLayoutParams()).topMargin = Math.round(4f * density);
             }
             parent.requestLayout();
+            repositionShapePopupAboveButton(activity, parent);
         } catch (Throwable t) {
             Log.w(TAG, "configureShapePopupWidthSlider failed", t);
         }
+    }
+
+    /**
+     * 순정 툴바가 도형 팝업의 기준(anchor)을 '더 보기' 버튼으로 잘못 잡았을 때,
+     * 메인 툴바의 '도형' 버튼 바로 위로 팝업 X 좌표를 깔끔하게 정렬합니다.
+     */
+    private static void repositionShapePopupAboveButton(final Activity activity, final View contentInPopup) {
+        if (activity == null || contentInPopup == null) return;
+        Runnable alignTask = new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    View shapeBtn = ToolbarFitHelper.findViewByIdName(activity, "explore_edu_toolbar_shape");
+                    if (shapeBtn == null || shapeBtn.getVisibility() != View.VISIBLE) return;
+                    View popupRoot = contentInPopup.getRootView();
+                    if (popupRoot == null || popupRoot == activity.getWindow().getDecorView()) return;
+                    ViewGroup.LayoutParams rawLp = popupRoot.getLayoutParams();
+                    if (!(rawLp instanceof android.view.WindowManager.LayoutParams)) return;
+                    android.view.WindowManager.LayoutParams wlp = (android.view.WindowManager.LayoutParams) rawLp;
+
+                    int[] btnLoc = new int[2];
+                    shapeBtn.getLocationOnScreen(btnLoc);
+                    int btnCenterX = btnLoc[0] + shapeBtn.getWidth() / 2;
+                    int popW = popupRoot.getWidth();
+                    if (popW <= 0) popW = contentInPopup.getWidth();
+                    if (popW <= 0) return;
+
+                    int screenW = activity.getResources().getDisplayMetrics().widthPixels;
+                    int margin = Math.round(12f * activity.getResources().getDisplayMetrics().density);
+                    int targetX = btnCenterX - popW / 2;
+                    if (targetX < margin) targetX = margin;
+                    if (targetX + popW > screenW - margin) targetX = screenW - margin - popW;
+
+                    if (Math.abs(wlp.x - targetX) > 16) {
+                        wlp.x = targetX;
+                        activity.getWindowManager().updateViewLayout(popupRoot, wlp);
+                    }
+                } catch (Throwable ignored) {}
+            }
+        };
+        contentInPopup.post(alignTask);
+        sHandler.postDelayed(alignTask, 35);
     }
 
     private static float readGeometryWidth(Activity activity) {

@@ -1,10 +1,10 @@
 {
-    "patchVersion":  205,
-    "patchName":  "2.0.5",
-    "buildDate":  "2026-11-26 16:51",
+    "patchVersion":  206,
+    "patchName":  "2.0.6",
+    "buildDate":  "2026-11-26 19:01",
     "minBaseVersionCode":  20900200,
     "dexUrl":  "https://raw.githubusercontent.com/devoursky-dot/gnflnote/main/ota/gnfl_patch.dex",
-    "sha256":  "50c0e30ae3a517ae5a23d951393bbec83aa6b17ed6bd38f82166a327772888fb",
-    "sizeBytes":  194296,
-    "releaseNotes":  "삭제 버튼 개선: PDF·이미지는 보존하고 펜글씨 + 모든 2D/3D 도형 일괄 삭제"
+    "sha256":  "aff2b95141de01d41865a2dda566a706e232c1788a07151fd997554f6351e59c",
+    "sizeBytes":  195236,
+    "releaseNotes":  "도형 팝업이 \u0027더 보기\u0027가 아닌 \u0027도형\u0027 버튼 바로 위에 정확히 열리도록 위치 보정"
 }
