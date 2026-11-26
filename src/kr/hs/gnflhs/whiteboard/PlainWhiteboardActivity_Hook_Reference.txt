@@ -1,0 +1,37 @@
+================================================================================
+GNFL NOTE - PlainWhiteboardActivity Hook Reference & Patch Architecture
+================================================================================
+
+1. Hook Location:
+   Class: com.seewo.easinote.PlainWhiteboardActivity
+   Method: protected void onActivityResult(int requestCode, int resultCode, Intent data)
+   Original Method Code Offset: 0x353d50 in classes.dex
+
+2. Stock Problem:
+   In stock firmware, when a user selects a PDF file via the system file picker (EasiFinder),
+   EasiFinder returns the file path via Intent extra:
+       data.getStringExtra("path")  or  data.getStringExtra("internalPath")
+   while data.getData() is NULL.
+   
+   The stock PlainWhiteboardActivity.E0 method has an early return:
+       if (data.getData() == null) return;
+   Additionally, in stock WhiteboardPresenter.O1:
+       if (!type.startsWith("pdf")) return;
+   Since standard Android PDF MIME type is "application/pdf" (not starting with "pdf"),
+   the stock app silently terminated without opening anything ("아무 반응이 없는 현상").
+
+3. Our Hook Bridge:
+   Original bytecode at method start (0x353d50):
+       6e 40 dc 74 10 32  -> invoke-virtual {p0, p1, p2, p3}, PlainWhiteboardActivity.E0:(IILIntent;)V
+   
+   Replaced with 6-byte invocation:
+       71 40 56 f8 10 32  -> invoke-static {p0, p1, p2, p3}, Lkr/hs/gnflhs/whiteboard/PdfPicker;->onActivityResult(Landroid/app/Activity;IILandroid/content/Intent;)V
+
+4. In kr.hs.gnflhs.whiteboard.PdfPicker:
+   - Reads path from Intent ("path", "internalPath", or data.getData().getPath())
+   - If endsWith(".pdf"), displays the custom PagePickerDialog
+   - PagePickerDialog:
+     * Left: GridView with page number buttons (1, 2, 3...)
+     * Right: Asynchronous background rendering with high-resolution preview & page navigation controls
+     * Insertion: High-resolution (2560px) rendering saved to cache PNG, then injected into chalkboard canvas via WhiteboardPresenter.V0(imagePath)
+   - If not PDF, safely forwards to stock E0 via reflection, ensuring zero regression for images or other files.

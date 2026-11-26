@@ -1,0 +1,19 @@
+# Build outputs & binaries
+app_root/
+build_out/
+*.apk
+*.ap_
+*.dex
+*.class
+*.jar
+*.so
+*.keystore
+*.jks
+*.p12
+
+# Local/IDE files
+.gradle/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
