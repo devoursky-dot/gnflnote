@@ -1,9 +1,9 @@
 {
-    "patchVersion":  201,
-    "patchName":  "2.0.1",
+    "patchVersion":  202,
+    "patchName":  "2.0.2",
     "minBaseVersionCode":  20900200,
     "dexUrl":  "https://raw.githubusercontent.com/devoursky-dot/gnflnote/main/ota/gnfl_patch.dex",
-    "sha256":  "8f6069fe2772bfba1c58d41e9b6898701f74940175c17fe62a080218c5337826",
-    "sizeBytes":  193140,
-    "releaseNotes":  "V2.0.1 OTA hot-update: fullscreen Shape button fix \u0026 live OTA verification"
+    "sha256":  "0e687f98f9c19eb0edae7dd58f51cd5ba87efb900eae90c1c97d5ef72d18b0ba",
+    "sizeBytes":  193340,
+    "releaseNotes":  "더 보기 팝업 내 중복 도형 버튼 숨김 처리 (메인 툴바에 표시 중일 때)"
 }

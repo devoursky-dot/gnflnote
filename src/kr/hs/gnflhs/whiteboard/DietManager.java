@@ -255,6 +255,15 @@ public class DietManager {
                     }
                     return;
                 }
+                // 도형 버튼이 메인 툴바에 이미 표시 중이면, '더 보기' 팝업 안의 중복 '도형' 항목은 숨김!
+                if ("explore_edu_toolbar_shape".equals(entryName)
+                        && root.getRootView() != activity.getWindow().getDecorView()) {
+                    View mainShapeBtn = ToolbarFitHelper.findViewByIdName(activity, "explore_edu_toolbar_shape");
+                    if (mainShapeBtn != null && mainShapeBtn != root && mainShapeBtn.getVisibility() == View.VISIBLE) {
+                        hideViewCompletely(findRowContainer(root));
+                        return;
+                    }
+                }
                 // 펜 팝업(pen_radio_group): 4번째 버튼(smart)을 순정 형광펜 아이콘 + 반투명 형광펜 모드로 교체!
                 if ("pen_radio_group".equals(entryName) && root instanceof ViewGroup) {
                     configurePenPopupHighlighter(activity, (ViewGroup) root);
@@ -308,6 +317,15 @@ public class DietManager {
                 if ("클라우드 저장공간".equals(txt) || "PDF 페이지 목록".equals(txt)) {
                     hideViewCompletely(findRowContainer(root));
                     return;
+                }
+
+                // '더 보기' 팝업 안의 중복 '도형' 항목: 메인 툴바에 '도형'이 이미 보이고 있으면 자동 숨김!
+                if ("도형".equals(txt) && root.getRootView() != activity.getWindow().getDecorView()) {
+                    View mainShapeBtn = ToolbarFitHelper.findViewByIdName(activity, "explore_edu_toolbar_shape");
+                    if (mainShapeBtn != null && mainShapeBtn.getVisibility() == View.VISIBLE) {
+                        hideViewCompletely(findRowContainer(root));
+                        return;
+                    }
                 }
 
                 // 기존 무반응 '이메일 전송' 행을 '앱 나가기'로 재활용 + 원래 나가기 아이콘(icon_exit)으로 교체
