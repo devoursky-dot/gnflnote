@@ -192,8 +192,8 @@ public class ToolbarFitHelper {
                 stateHolder.getClass().getMethod("m").invoke(stateHolder);
             } catch (Throwable ignored) {}
 
-            showTopToast(activity, "펜글씨 " + penStrokes.size() + "획을 삭제했습니다.");
-            Log.i(TAG, "Cleared " + penStrokes.size() + " pen ink strokes (preserved non-ink objects)");
+            showTopToast(activity, "판서·도형 " + penStrokes.size() + "개를 삭제했습니다.");
+            Log.i(TAG, "Cleared " + penStrokes.size() + " pen/shape objects (preserved PDF/ImageShape)");
         } catch (Throwable t) {
             Log.e(TAG, "Error in clearOnlyPenStrokes", t);
         }
@@ -202,15 +202,30 @@ public class ToolbarFitHelper {
     private static boolean isPenInkShape(Object shape, Class<?> abstractInkCls) {
         if (shape == null) return false;
         String clsName = shape.getClass().getName();
+        // PDF 페이지 및 올가미 이미지(ImageShape)는 반드시 보존!
         if (clsName.contains("ImageShape")) return false;
         if (abstractInkCls != null && abstractInkCls.isInstance(shape)) {
             return true;
         }
+        // 모든 2D 도형(IStroke) 및 3D 입체도형(AbstractPolygon/Abstract3dShape)도 판서와 함께 일괄 삭제!
+        try {
+            if (Class.forName("com.seewo.libshapes.interfaces.IStroke").isInstance(shape)) {
+                return true;
+            }
+        } catch (Throwable ignored) {}
+        try {
+            if (Class.forName("com.seewo.libshapes.AbstractPolygon").isInstance(shape)) {
+                return true;
+            }
+        } catch (Throwable ignored) {}
         // 계층 이름 폴백 검사
         Class<?> c = shape.getClass();
         while (c != null && c != Object.class) {
             String n = c.getSimpleName();
-            if (n.contains("Ink") || n.contains("Pen") || n.contains("Stroke") || n.contains("Brush") || n.contains("Highlighter")) {
+            if (n.contains("Ink") || n.contains("Pen") || n.contains("Stroke")
+                    || n.contains("Brush") || n.contains("Highlighter")
+                    || n.contains("Ellipse") || n.contains("Line") || n.contains("Arrow")
+                    || n.contains("Polygon") || n.contains("3dShape")) {
                 return true;
             }
             c = c.getSuperclass();

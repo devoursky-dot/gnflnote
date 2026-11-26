@@ -1,10 +1,10 @@
 {
-    "patchVersion":  204,
-    "patchName":  "2.0.4",
-    "buildDate":  "2026-11-26 16:32",
+    "patchVersion":  205,
+    "patchName":  "2.0.5",
+    "buildDate":  "2026-11-26 16:51",
     "minBaseVersionCode":  20900200,
     "dexUrl":  "https://raw.githubusercontent.com/devoursky-dot/gnflnote/main/ota/gnfl_patch.dex",
-    "sha256":  "737a90f34debaaff9e0f16d75519635cf0d38359bc63f9b6bfcfb51c5cf003a5",
-    "sizeBytes":  194060,
-    "releaseNotes":  "수동 업데이트 메뉴(배포일 표시 + 자동 재시작) 및 더 보기 보조 도구 복원"
+    "sha256":  "50c0e30ae3a517ae5a23d951393bbec83aa6b17ed6bd38f82166a327772888fb",
+    "sizeBytes":  194296,
+    "releaseNotes":  "삭제 버튼 개선: PDF·이미지는 보존하고 펜글씨 + 모든 2D/3D 도형 일괄 삭제"
 }
