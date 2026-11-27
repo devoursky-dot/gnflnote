@@ -55,6 +55,12 @@ public class ScrollPdfSurfaceView extends SurfaceView implements SurfaceHolder.C
     private int mOuterBgColor = Color.parseColor("#F1F5F9");
     private boolean mSmartPenEnabled = true;
     private float mEraserBaseRadiusPx = 42f;
+    private boolean mEraserAreaMode = true; // 툴바 지우개 기본: 영역 선택 지우개
+    private float mSmoothedPalmRadius = 0f;
+    private boolean mEraserRectDragging = false;
+    private float mEraserRectStartX, mEraserRectStartY, mEraserRectEndX, mEraserRectEndY;
+    private final Paint mEraserBoxFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint mEraserBoxStrokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     // ─── SurfaceView + GPU 하드웨어 가속 & VSync 60fps ────────────────
     private boolean mSurfaceReady = false;
@@ -352,6 +358,13 @@ public class ScrollPdfSurfaceView extends SurfaceView implements SurfaceHolder.C
         mBadgeTextPaint.setTextSize(26f);
         mBadgeTextPaint.setFakeBoldText(true);
         mBadgeTextPaint.setTextAlign(Paint.Align.CENTER);
+
+        mEraserBoxFillPaint.setStyle(Paint.Style.FILL);
+        mEraserBoxFillPaint.setColor(Color.argb(42, 239, 68, 68));
+        mEraserBoxStrokePaint.setStyle(Paint.Style.STROKE);
+        mEraserBoxStrokePaint.setColor(Color.parseColor("#EF4444"));
+        mEraserBoxStrokePaint.setStrokeWidth(4f);
+        mEraserBoxStrokePaint.setPathEffect(new DashPathEffect(new float[] { 18f, 12f }, 0f));
     }
 
     // ─── SurfaceHolder.Callback ──────────────────────────────────────
@@ -463,6 +476,8 @@ public class ScrollPdfSurfaceView extends SurfaceView implements SurfaceHolder.C
     public boolean isSmartPenEnabled() { return mSmartPenEnabled; }
     public void setEraserBaseRadiusPx(float r) { mEraserBaseRadiusPx = Math.max(18f, Math.min(120f, r)); }
     public float getEraserBaseRadiusPx() { return mEraserBaseRadiusPx; }
+    public void setEraserAreaMode(boolean areaMode) { mEraserAreaMode = areaMode; }
+    public boolean isEraserAreaMode() { return mEraserAreaMode; }
     public void setOuterBgColor(int color) {
         mOuterBgColor = color;
         invalidateViewport4kTile();
@@ -1392,6 +1407,24 @@ public class ScrollPdfSurfaceView extends SurfaceView implements SurfaceHolder.C
         notifyHistoryChanged();
     }
 
+    /**
+     * 손바닥/손등 터치의 최대 영역(max(touchMajor, touchMinor))에 맞춰
+     * 유동적으로 원형 지우개 반지름을 계산 (EMA 스무딩으로 떨림 방지).
+     */
+    private float computeDynamicPalmRadius(MotionEvent ev, int idx) {
+        if (ev == null || idx < 0 || idx >= ev.getPointerCount()) return 64f;
+        float major = ev.getTouchMajor(idx);
+        float minor = ev.getTouchMinor(idx);
+        float span = Math.max(major, minor);
+        float target = Math.max(52f, Math.min(260f, span * 0.95f));
+        if (mSmoothedPalmRadius <= 0f) {
+            mSmoothedPalmRadius = target;
+        } else {
+            mSmoothedPalmRadius = mSmoothedPalmRadius * 0.60f + target * 0.40f;
+        }
+        return mSmoothedPalmRadius;
+    }
+
     @Override
     public boolean onTouchEvent(MotionEvent ev) {
         if (mIsLoading || !mFirstPageRendered || mPageCount <= 0) return true;
@@ -1401,7 +1434,9 @@ public class ScrollPdfSurfaceView extends SurfaceView implements SurfaceHolder.C
             case MotionEvent.ACTION_DOWN: {
                 mIsTwoFingerGesture = false;
                 mPalmErasing = false;
+                mSmoothedPalmRadius = 0f;
                 mShowEraserCircle = false;
+                mEraserRectDragging = false;
                 mMultiPenStrokes.clear();
                 mMultiLastScreen.clear();
                 mActivePointerId = ev.getPointerId(0);
@@ -1415,16 +1450,24 @@ public class ScrollPdfSurfaceView extends SurfaceView implements SurfaceHolder.C
                         mPalmErasing = true;
                         mErasedBatch.clear();
                         mErasedAddedBatch.clear();
-                        float r = Math.max(46f, ev.getTouchMajor(palmIdx) * 0.75f);
+                        float r = computeDynamicPalmRadius(ev, palmIdx);
                         eraseAtScreenPointFast(ev.getX(palmIdx), ev.getY(palmIdx), r);
                     } else {
                         startPenStroke(ev.getX(0), ev.getY(0));
                     }
                 } else if (mToolMode == ToolMode.ERASER) {
-                    mErasedBatch.clear();
-                    mErasedAddedBatch.clear();
-                    float r = Math.max(mEraserBaseRadiusPx, ev.getTouchMajor(0) * 0.75f);
-                    eraseAtScreenPointFast(ev.getX(0), ev.getY(0), r);
+                    if (mEraserAreaMode) {
+                        clearHardwareOverlayNow();
+                        mEraserRectDragging = true;
+                        mEraserRectStartX = mEraserRectEndX = ev.getX(0);
+                        mEraserRectStartY = mEraserRectEndY = ev.getY(0);
+                        scheduleVsyncFrame();
+                    } else {
+                        mErasedBatch.clear();
+                        mErasedAddedBatch.clear();
+                        float r = Math.max(mEraserBaseRadiusPx, ev.getTouchMajor(0) * 0.75f);
+                        eraseAtScreenPointFast(ev.getX(0), ev.getY(0), r);
+                    }
                 } else if (mToolMode == ToolMode.LASSO) {
                     mLassoDragging = true;
                     mLassoScreenPts.clear();
@@ -1458,7 +1501,7 @@ public class ScrollPdfSurfaceView extends SurfaceView implements SurfaceHolder.C
                         mSmartRecognized = false;
                         mPalmErasing = true;
                         int idx = (palmIdx >= 0) ? palmIdx : ev.getActionIndex();
-                        float r = Math.max(46f, ev.getTouchMajor(idx) * 0.75f);
+                        float r = computeDynamicPalmRadius(ev, idx);
                         renderFullFrame();
                         eraseAtScreenPointFast(ev.getX(idx), ev.getY(idx), r);
                     } else {
@@ -1527,7 +1570,7 @@ public class ScrollPdfSurfaceView extends SurfaceView implements SurfaceHolder.C
                             renderFullFrame();
                         }
                         int idx = (palmIdx >= 0) ? palmIdx : 0;
-                        float r = Math.max(46f, ev.getTouchMajor(idx) * 0.75f);
+                        float r = computeDynamicPalmRadius(ev, idx);
                         eraseAtScreenPointFast(ev.getX(idx), ev.getY(idx), r);
                         return true;
                     }
@@ -1597,8 +1640,14 @@ public class ScrollPdfSurfaceView extends SurfaceView implements SurfaceHolder.C
                     }
                     movePenStroke(sx, sy);
                 } else if (mToolMode == ToolMode.ERASER) {
-                    float r = Math.max(mEraserBaseRadiusPx, ev.getTouchMajor(idx) * 0.75f);
-                    eraseAtScreenPointFast(sx, sy, r);
+                    if (mEraserAreaMode && mEraserRectDragging) {
+                        mEraserRectEndX = sx;
+                        mEraserRectEndY = sy;
+                        scheduleVsyncFrame();
+                    } else {
+                        float r = Math.max(mEraserBaseRadiusPx, ev.getTouchMajor(idx) * 0.75f);
+                        eraseAtScreenPointFast(sx, sy, r);
+                    }
                 } else if (mToolMode == ToolMode.LASSO && mLassoDragging) {
                     mLassoScreenPts.add(new PointF(sx, sy));
                     mLassoScreenPath.lineTo(sx, sy);
@@ -1637,6 +1686,7 @@ public class ScrollPdfSurfaceView extends SurfaceView implements SurfaceHolder.C
 
                 if (mPalmErasing) {
                     mPalmErasing = false;
+                    mSmoothedPalmRadius = 0f;
                     commitEraseBatchToUndo();
                     renderFullFrame();
                     return true;
@@ -1654,8 +1704,12 @@ public class ScrollPdfSurfaceView extends SurfaceView implements SurfaceHolder.C
                         finishPenStroke();
                     }
                 } else if (mToolMode == ToolMode.ERASER) {
-                    commitEraseBatchToUndo();
-                    renderFullFrame();
+                    if (mEraserAreaMode && mEraserRectDragging) {
+                        finishAreaEraserSelection();
+                    } else {
+                        commitEraseBatchToUndo();
+                        renderFullFrame();
+                    }
                 } else if (mToolMode == ToolMode.SELECT) {
                     long dt = ev.getEventTime() - mDownTime;
                     float moveDist = (float) Math.hypot(ev.getX() - mDownScreenX, ev.getY() - mDownScreenY);
@@ -1704,6 +1758,98 @@ public class ScrollPdfSurfaceView extends SurfaceView implements SurfaceHolder.C
         mErasedBatch.clear();
         mErasedAddedBatch.clear();
         notifyHistoryChanged();
+    }
+
+    /**
+     * 선택 영역(사각형)에 걸친 모든 판서 획을 한 번에 삭제하고 Undo 1스텝으로 기록.
+     */
+    private void finishAreaEraserSelection() {
+        mEraserRectDragging = false;
+        float sl = Math.min(mEraserRectStartX, mEraserRectEndX);
+        float st = Math.min(mEraserRectStartY, mEraserRectEndY);
+        float sr = Math.max(mEraserRectStartX, mEraserRectEndX);
+        float sb = Math.max(mEraserRectStartY, mEraserRectEndY);
+        // 탭만 한 경우에도 작은 반경(24px)으로 걸친 획 삭제 지원
+        if (sr - sl < 16f && sb - st < 16f) {
+            sl -= 24f; sr += 24f;
+            st -= 24f; sb += 24f;
+        }
+        float docL = screenToDocX(sl);
+        float docT = screenToDocY(st);
+        float docR = screenToDocX(sr);
+        float docB = screenToDocY(sb);
+
+        ArrayList<InkStroke> list = activeStrokeList();
+        ArrayList<InkStroke> removed = new ArrayList<InkStroke>();
+        Iterator<InkStroke> it = list.iterator();
+        while (it.hasNext()) {
+            InkStroke s = it.next();
+            if (strokeIntersectsDocRect(s, docL, docT, docR, docB)) {
+                removed.add(s);
+                it.remove();
+            }
+        }
+        if (!removed.isEmpty()) {
+            activeUndoStack().add(new UndoAction(removed, new ArrayList<InkStroke>()));
+            activeRedoStack().clear();
+            notifyHistoryChanged();
+        }
+        renderFullFrame();
+    }
+
+    private static boolean strokeIntersectsDocRect(InkStroke s, float l, float t, float r, float b) {
+        if (s == null) return false;
+        float pad = Math.max(2f, s.widthDoc * 0.5f);
+        if (s.maxX + pad < l || s.minX - pad > r || s.maxY + pad < t || s.minY - pad > b) {
+            return false;
+        }
+        if (s.kind == StrokeKind.FREEHAND && s.points != null && !s.points.isEmpty()) {
+            int n = s.points.size();
+            if (n == 1) {
+                PointF p = s.points.get(0);
+                return p.x >= l - pad && p.x <= r + pad && p.y >= t - pad && p.y <= b + pad;
+            }
+            for (int i = 0; i < n - 1; i++) {
+                PointF p0 = s.points.get(i);
+                PointF p1 = s.points.get(i + 1);
+                if (segmentIntersectsRect(p0.x, p0.y, p1.x, p1.y, l - pad, t - pad, r + pad, b + pad)) {
+                    return true;
+                }
+            }
+            return false;
+        } else if (s.kind == StrokeKind.LINE) {
+            return segmentIntersectsRect(s.ax, s.ay, s.bx, s.by, l - pad, t - pad, r + pad, b + pad);
+        } else if (s.kind == StrokeKind.POLYGON && s.corners != null && s.corners.length >= 6) {
+            int m = s.corners.length / 2;
+            for (int i = 0; i < m; i++) {
+                int j = (i + 1) % m;
+                if (segmentIntersectsRect(
+                        s.corners[i * 2], s.corners[i * 2 + 1],
+                        s.corners[j * 2], s.corners[j * 2 + 1],
+                        l - pad, t - pad, r + pad, b + pad)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        // CIRCLE / ELLIPSE 등은 바운딩 박스 교차 통과 시 삭제
+        return true;
+    }
+
+    private static boolean segmentIntersectsRect(float x0, float y0, float x1, float y1,
+                                                 float l, float t, float r, float b) {
+        if (Math.max(x0, x1) < l || Math.min(x0, x1) > r
+                || Math.max(y0, y1) < t || Math.min(y0, y1) > b) {
+            return false;
+        }
+        // 샘플링(4등분)으로 대각선 선분의 정확한 사각형 교차 판정
+        for (int k = 0; k <= 4; k++) {
+            float u = k * 0.25f;
+            float px = x0 + (x1 - x0) * u;
+            float py = y0 + (y1 - y0) * u;
+            if (px >= l && px <= r && py >= t && py <= b) return true;
+        }
+        return false;
     }
 
     // ─── 펜 & 스마트펜 ───────────────────────────────────────────────
@@ -2191,6 +2337,7 @@ public class ScrollPdfSurfaceView extends SurfaceView implements SurfaceHolder.C
             canvas.restore();
 
             if (mShowEraserCircle) canvas.drawCircle(mEraserCircleX, mEraserCircleY, mEraserCircleR, mEraserRingPaint);
+            if (mEraserRectDragging) drawEraserSelectionBox(canvas);
             drawTopRightBadge(canvas, "✂ 집중 풀이 중 (올가미로 복귀)");
             return;
         }
@@ -2231,11 +2378,22 @@ public class ScrollPdfSurfaceView extends SurfaceView implements SurfaceHolder.C
         canvas.restore();
 
         if (mShowEraserCircle) canvas.drawCircle(mEraserCircleX, mEraserCircleY, mEraserCircleR, mEraserRingPaint);
+        if (mEraserRectDragging) drawEraserSelectionBox(canvas);
         if (mLassoDragging && mLassoScreenPts.size() >= 2) {
             canvas.drawPath(mLassoScreenPath, mLassoFillPaint);
             canvas.drawPath(mLassoScreenPath, mLassoPaint);
         }
         drawTopRightBadge(canvas, (getCurrentPageIndex() + 1) + " / " + mPageCount + " 쪽");
+    }
+
+    private void drawEraserSelectionBox(Canvas canvas) {
+        float l = Math.min(mEraserRectStartX, mEraserRectEndX);
+        float t = Math.min(mEraserRectStartY, mEraserRectEndY);
+        float r = Math.max(mEraserRectStartX, mEraserRectEndX);
+        float b = Math.max(mEraserRectStartY, mEraserRectEndY);
+        mTmpRectF.set(l, t, r, b);
+        canvas.drawRoundRect(mTmpRectF, 12f, 12f, mEraserBoxFillPaint);
+        canvas.drawRoundRect(mTmpRectF, 12f, 12f, mEraserBoxStrokePaint);
     }
 
     private void drawStroke(Canvas canvas, InkStroke s) {

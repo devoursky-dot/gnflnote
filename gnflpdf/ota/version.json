@@ -1,9 +1,9 @@
 {
-    "versionCode":  100,
-    "versionName":  "1.0.0",
-    "buildDate":  "2026-11-27 18:54",
+    "versionCode":  101,
+    "versionName":  "1.0.1",
+    "buildDate":  "2026-11-27 19:05",
     "apkUrl":  "https://raw.githubusercontent.com/devoursky-dot/gnflnote/main/gnflpdf/ota/GNFLPDF.apk",
-    "sha256":  "6fa081094cecdf086d9e09410fb25fd57274f774dbf60432b16b08f721bf2279",
-    "sizeBytes":  16949027,
-    "releaseNotes":  "GNFLPDF 정식 릴리즈 (0.21ms 순정 하드웨어 가속, 480p-\u003e4K 가변 렌더링, GNFLNOTE 툴바, 페이지 미리보기, 3GB LRU 캐시/PIN 잠금, GitHub 자동 업데이트)"
+    "sha256":  "eef2b026ddec04332ae5a4e8d5ffcd4c518b1b3991301f00dddee47d13ce8997",
+    "sizeBytes":  16965411,
+    "releaseNotes":  "손바닥/손등 유동 원형 지우개(최대 터치 면적 연동) + 툴바 영역 선택 지우개(걸친 판서 일괄 삭제) 업그레이드"
 }

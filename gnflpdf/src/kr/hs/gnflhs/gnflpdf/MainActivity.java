@@ -994,7 +994,7 @@ public class MainActivity extends Activity {
         showPopupAbove(panel, anchor);
     }
 
-    // ─── 지우개 크기 선택 팝업 ────────────────────────────────────────
+    // ─── 지우개 모드(영역 선택 / 부분 문지르기) 및 크기 팝업 ──────────
     private void showEraserSettingsPopup(View anchor) {
         if (mActivePopup != null && mActivePopup.isShowing()) {
             dismissActivePopup();
@@ -1002,45 +1002,103 @@ public class MainActivity extends Activity {
         }
         if (mSurfaceView != null) mSurfaceView.suspendHardwareOverlay();
 
+        final boolean isArea = (mSurfaceView == null || mSurfaceView.isEraserAreaMode());
         LinearLayout panel = createPopupCard();
         panel.setPadding(dp(16), dp(12), dp(16), dp(14));
 
-        TextView title = new TextView(this);
-        title.setText("부분 지우개 크기");
-        title.setTextColor(Color.parseColor("#64748B"));
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
+        TextView modeTitle = new TextView(this);
+        modeTitle.setText("지우개 방식");
+        modeTitle.setTextColor(Color.parseColor("#64748B"));
+        modeTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
+        modeTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        LinearLayout.LayoutParams mtlp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        tlp.bottomMargin = dp(8);
-        panel.addView(title, tlp);
+        mtlp.bottomMargin = dp(6);
+        panel.addView(modeTitle, mtlp);
 
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        for (int i = 0; i < ERASER_PRESETS.length; i++) {
-            final int idx = i;
-            Button b = new Button(this);
-            b.setText(ERASER_LABELS[i]);
-            b.setAllCaps(false);
-            b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
-            b.setTypeface(Typeface.DEFAULT_BOLD);
-            b.setTextColor(i == mEraserPresetIdx ? Color.WHITE : Color.parseColor("#334155"));
-            GradientDrawable bg = new GradientDrawable();
-            bg.setCornerRadius(dp(10));
-            bg.setColor(i == mEraserPresetIdx ? Color.parseColor("#00A884") : Color.parseColor("#F1F5F9"));
-            b.setBackground(bg);
-            LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(dp(54), dp(38));
-            blp.setMargins(dp(4), 0, dp(4), 0);
-            b.setOnClickListener(v -> {
-                mEraserPresetIdx = idx;
-                if (mSurfaceView != null) mSurfaceView.setEraserBaseRadiusPx(ERASER_PRESETS[idx]);
-                dismissActivePopup();
-            });
-            row.addView(b, blp);
-        }
-        panel.addView(row, new LinearLayout.LayoutParams(
+        LinearLayout modeRow = new LinearLayout(this);
+        modeRow.setOrientation(LinearLayout.HORIZONTAL);
+        modeRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        Button btnArea = new Button(this);
+        btnArea.setText("⬚ 영역 선택");
+        btnArea.setAllCaps(false);
+        btnArea.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
+        btnArea.setTypeface(Typeface.DEFAULT_BOLD);
+        btnArea.setTextColor(isArea ? Color.WHITE : Color.parseColor("#334155"));
+        GradientDrawable aBg = new GradientDrawable();
+        aBg.setCornerRadius(dp(10));
+        aBg.setColor(isArea ? Color.parseColor("#00A884") : Color.parseColor("#F1F5F9"));
+        btnArea.setBackground(aBg);
+        btnArea.setPadding(dp(12), dp(6), dp(12), dp(6));
+        btnArea.setOnClickListener(v -> {
+            if (mSurfaceView != null) mSurfaceView.setEraserAreaMode(true);
+            dismissActivePopup();
+            Toast.makeText(this, "영역 선택 지우개 (드래그 영역에 걸친 판서 삭제)", Toast.LENGTH_SHORT).show();
+        });
+        modeRow.addView(btnArea, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)));
+
+        Button btnRub = new Button(this);
+        btnRub.setText("● 부분 문지르기");
+        btnRub.setAllCaps(false);
+        btnRub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
+        btnRub.setTypeface(Typeface.DEFAULT_BOLD);
+        btnRub.setTextColor(!isArea ? Color.WHITE : Color.parseColor("#334155"));
+        GradientDrawable rBg = new GradientDrawable();
+        rBg.setCornerRadius(dp(10));
+        rBg.setColor(!isArea ? Color.parseColor("#00A884") : Color.parseColor("#F1F5F9"));
+        btnRub.setBackground(rBg);
+        btnRub.setPadding(dp(12), dp(6), dp(12), dp(6));
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38));
+        rlp.leftMargin = dp(8);
+        btnRub.setOnClickListener(v -> {
+            if (mSurfaceView != null) mSurfaceView.setEraserAreaMode(false);
+            dismissActivePopup();
+            Toast.makeText(this, "부분 문지르기 지우개", Toast.LENGTH_SHORT).show();
+        });
+        modeRow.addView(btnRub, rlp);
+        panel.addView(modeRow, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        if (!isArea) {
+            TextView title = new TextView(this);
+            title.setText("부분 지우개 크기");
+            title.setTextColor(Color.parseColor("#64748B"));
+            title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
+            title.setTypeface(Typeface.DEFAULT_BOLD);
+            LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            tlp.topMargin = dp(10);
+            tlp.bottomMargin = dp(6);
+            panel.addView(title, tlp);
+
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            for (int i = 0; i < ERASER_PRESETS.length; i++) {
+                final int idx = i;
+                Button b = new Button(this);
+                b.setText(ERASER_LABELS[i]);
+                b.setAllCaps(false);
+                b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
+                b.setTypeface(Typeface.DEFAULT_BOLD);
+                b.setTextColor(i == mEraserPresetIdx ? Color.WHITE : Color.parseColor("#334155"));
+                GradientDrawable bg = new GradientDrawable();
+                bg.setCornerRadius(dp(10));
+                bg.setColor(i == mEraserPresetIdx ? Color.parseColor("#00A884") : Color.parseColor("#F1F5F9"));
+                b.setBackground(bg);
+                LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(dp(54), dp(38));
+                blp.setMargins(dp(4), 0, dp(4), 0);
+                b.setOnClickListener(v -> {
+                    mEraserPresetIdx = idx;
+                    if (mSurfaceView != null) mSurfaceView.setEraserBaseRadiusPx(ERASER_PRESETS[idx]);
+                    dismissActivePopup();
+                });
+                row.addView(b, blp);
+            }
+            panel.addView(row, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
 
         showPopupAbove(panel, anchor);
     }
