@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$ReleaseNotes = "GNFLPDF 정식 릴리즈 (0.21ms 순정 하드웨어 가속, 480p->4K 가변 렌더링, GNFLNOTE 툴바, 페이지 미리보기, 3GB LRU 캐시/PIN 잠금, GitHub 자동 업데이트)"
 )
 
@@ -60,6 +60,7 @@ Write-Host "=== [4/4] Committing and pushing to GitHub (main) ==="
 Push-Location $STAGE
 try {
     git add gnflpdf
+    git add -f gnflpdf/ota/GNFLPDF.apk
     $status = git status --porcelain gnflpdf
     if ($status) {
         git commit -m "Release GNFLPDF v$vName (code $vCode) with GitHub OTA updater"

@@ -3,7 +3,7 @@
     "versionName":  "1.0.0",
     "buildDate":  "2026-11-27 18:54",
     "apkUrl":  "https://raw.githubusercontent.com/devoursky-dot/gnflnote/main/gnflpdf/ota/GNFLPDF.apk",
-    "sha256":  "a4c4a093ecd476dbdc8bc6e8b34b8bd4a462fbfcc34ad73de724a675067569e1",
+    "sha256":  "6fa081094cecdf086d9e09410fb25fd57274f774dbf60432b16b08f721bf2279",
     "sizeBytes":  16949027,
-    "releaseNotes":  "GNFLPDF ?뺤떇 由대━利?(0.21ms ?쒖젙 ?섎뱶?⑥뼱 媛?? 480p-\u003e4K 媛蹂 ?뚮뜑留? GNFLNOTE ?대컮, ?섏씠吏 誘몃━蹂닿린, 3GB LRU 罹먯떆/PIN ?좉툑, GitHub ?먮룞 ?낅뜲?댄듃)"
+    "releaseNotes":  "GNFLPDF 정식 릴리즈 (0.21ms 순정 하드웨어 가속, 480p-\u003e4K 가변 렌더링, GNFLNOTE 툴바, 페이지 미리보기, 3GB LRU 캐시/PIN 잠금, GitHub 자동 업데이트)"
 }
